@@ -1,13 +1,97 @@
 # Firmware
 
-Not published yet. The Degen Walkie firmware will be released here during the pre-order, before Genesis ships.
+The Degen Walkie firmware: C with [LVGL](https://lvgl.io) on the ESP32-S3. The same source builds two ways:
 
-What it will cover:
+| Target | How | Output |
+| --- | --- | --- |
+| ESP32-S3 (the device) | ESP-IDF 5.3, `idf.py build` | `build/degen_walkie.bin` |
+| Browser simulator | Emscripten, `tools/build_sim.py` | `../simulator/public/fw/walkie.wasm` |
 
-- Secure boot, flash encryption and encrypted storage of the trading keys you link to the device
-- Order signing for Hyperliquid, Pacifica and Lighter, with the physical trade key as the only way to send an order
-- Display, touch, thumb wheel, trade key and status light
-- Audio for the live rooms and the AI (ES8388 codec)
-- The MCP interface that lets AI agents read and propose, but never send
+**Try it:** [degenwalkie.trade/sim](https://degenwalkie.trade/sim) runs this firmware in your browser against mock venue servers.
 
-Target: ESP32-S3 (ESP32-S3-MINI-1-N4R2). Pin assignments are in [`../hardware/mainboard/README.md`](../hardware/mainboard/README.md).
+> **Status.** The firmware runs end to end in the simulator. It has not run on a device yet: rev 7 mainboards are in bring-up. Expect the board layer (`main/`) to need fixes on first power-up, for example the display orientation, colour order, the GT911 address and the AXP2101 charger settings.
+
+## Layout
+
+```
+core/                 Platform-independent firmware (shared by both targets)
+  include/dw_hal.h    The hardware abstraction: the only way the core reaches the board
+  dw_app.c            Start-up, input routing, the voice path
+  dw_model.[ch]       Markets, positions, accounts, rooms, news
+  venues/             Venue clients: hl.c, pacifica.c, lighter.c, relay.c
+  crypto/             Keccak-256, secp256k1 and Ed25519 signing, MessagePack, base58
+  ui/                 UI kit and screens (rooms, chart, ticket, confirm sheet, accounts…)
+  fonts/              Archivo, Inter and JetBrains Mono, converted for LVGL
+  lv_conf.h           LVGL configuration (both targets)
+main/                 ESP32-S3 board layer: AXP2101, TCA9555, ST7796U, GT911, wheel,
+                      keys, status light, Wi-Fi, HTTP/WebSocket, NVS
+sim/                  WebAssembly board layer: canvas, pointer, the page's mock network
+components/dw_core/   ESP-IDF component wrapper around core/ and third_party/
+third_party/          secp256k1 (Bitcoin Core), Monocypher, cJSON
+tools/                build_sim.py, gen_fonts.py
+```
+
+## How trading works
+
+The device makes its own trading key for each venue. You approve that key from your main wallet once, on your phone. From then on the device signs orders locally; nothing else holds the key. The key is limited by the venue:
+
+| Venue | Device key | Signing | What it cannot do |
+| --- | --- | --- | --- |
+| Hyperliquid | Agent (API) wallet, secp256k1 | EIP-712 "phantom agent" over the msgpack hash of the action | Withdraw or transfer. Those need the main wallet's signature. |
+| Pacifica | Agent wallet, Ed25519 | Ed25519 over sorted, compact JSON; base58 | The firmware never builds a withdrawal. |
+| Lighter | API key | See note below | Withdraw anywhere except the account's own address. |
+
+Every order goes through one confirmation sheet, and only the physical trade key signs it. Touch can build a ticket but cannot sign.
+
+**Lighter note.** Lighter signs transactions with Schnorr over the ECgFp5 curve with Poseidon2 hashing. That signer is not ported to C yet, so `lighter.c` signs `tx_info` with an Ed25519 stand-in, which the simulator's mock accepts. Endpoints, transaction types, integer scaling and nonces follow the real API.
+
+## Build for the device
+
+ESP-IDF 5.3 or newer:
+
+```sh
+cd firmware
+idf.py set-target esp32s3
+idf.py menuconfig          # Degen Walkie → Wi-Fi SSID and password (development builds)
+idf.py build flash monitor
+```
+
+Or with Docker, no local toolchain:
+
+```sh
+docker run --rm -v "$PWD":/project -w /project espressif/idf:v5.3.1 \
+  sh -c "idf.py set-target esp32s3 && idf.py build"
+```
+
+LVGL and the display, touch and WebSocket drivers come from the ESP component registry (`main/idf_component.yml`).
+
+**Production builds** add secure boot v2, flash encryption and encrypted NVS, so the keys are encrypted at rest and only signed firmware runs:
+
+```sh
+idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.secure" build
+```
+
+This burns eFuses and cannot be undone. Don't use it on a development board.
+
+## Build the simulator
+
+Needs [emsdk](https://emscripten.org) on the PATH and an LVGL v9.2 checkout:
+
+```sh
+git clone --depth 1 -b v9.2.2 https://github.com/lvgl/lvgl.git ../lvgl
+LVGL_DIR=../lvgl python tools/build_sim.py
+cd ../simulator && npm install && npm run build
+npx serve public            # or any static server
+```
+
+## Not done yet
+
+- Lighter's real transaction signer (see above).
+- Voice on the device: ES8388 capture and streaming to the relay's speech-to-text. The simulator uses typed text or the browser's speech recognition.
+- Wi-Fi setup by scanning a QR with the rear camera. Development builds take Wi-Fi from menuconfig.
+- HTTP keep-alive per venue, OTA updates, power-off sheet, camera.
+- The blue channel of the status light is not fitted on rev 7, so blue shows as green + red.
+
+## Licences
+
+Firmware: MIT (see [`LICENSE`](LICENSE)). Third-party code keeps its own licence: LVGL (MIT), secp256k1 (MIT), Monocypher (CC0 / BSD-2-Clause), cJSON (MIT). Fonts: Archivo, Inter and JetBrains Mono, SIL Open Font License 1.1.

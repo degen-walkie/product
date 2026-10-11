@@ -1,0 +1,8 @@
+menu "Degen Walkie"
+    config DW_WIFI_SSID
+        string "Wi-Fi SSID (development builds)"
+        default ""
+    config DW_WIFI_PASSWORD
+        string "Wi-Fi password (development builds)"
+        default ""
+endmenu

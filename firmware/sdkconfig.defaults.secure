@@ -1,0 +1,10 @@
+# Production: secure boot v2 + flash encryption + encrypted NVS, so the trading keys
+# are encrypted at rest and only signed firmware runs. Apply with:
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.secure" build
+# Burning these eFuses is irreversible. Do not enable on development boards.
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
+CONFIG_NVS_ENCRYPTION=y
+CONFIG_ESP_CONSOLE_NONE=y

@@ -1,0 +1,20 @@
+#pragma once
+#include "lvgl.h"
+
+LV_FONT_DECLARE(dw_mono_9)
+LV_FONT_DECLARE(dw_mono_11)
+LV_FONT_DECLARE(dw_mono_13)
+LV_FONT_DECLARE(dw_mono_15)
+LV_FONT_DECLARE(dw_mono_24)
+LV_FONT_DECLARE(dw_mono_30)
+LV_FONT_DECLARE(dw_monob_9)
+LV_FONT_DECLARE(dw_monob_11)
+LV_FONT_DECLARE(dw_monob_13)
+LV_FONT_DECLARE(dw_monob_18)
+LV_FONT_DECLARE(dw_sans_12)
+LV_FONT_DECLARE(dw_sans_14)
+LV_FONT_DECLARE(dw_sansb_15)
+LV_FONT_DECLARE(dw_disp_14)
+LV_FONT_DECLARE(dw_disp_20)
+LV_FONT_DECLARE(dw_disp_24)
+LV_FONT_DECLARE(dw_disp_32)

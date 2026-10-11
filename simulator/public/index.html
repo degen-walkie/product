@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Degen Walkie Simulator</title>
+<meta name="description" content="The Degen Walkie firmware compiled to WebAssembly, trading against mock Hyperliquid, Pacifica and Lighter servers.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307080a'/%3E%3Crect x='10' y='5' width='12' height='22' rx='3' fill='none' stroke='%2314f195' stroke-width='2.4'/%3E%3Ccircle cx='16' cy='9' r='1.6' fill='%2314f195'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="https://degenwalkie.trade/"><b>DEGEN</b> <span>WALKIE</span></a>
+  <span class="tag">Simulator</span>
+  <span class="badge"><i></i>Real firmware · WebAssembly · mock venues</span>
+  <nav>
+    <a href="https://degenwalkie.trade/">Website</a>
+    <a href="https://github.com/degen-walkie/product/tree/main/firmware">Firmware source</a>
+    <button id="reset" class="ghost" title="Erase the device keys, wallets and book">Reset</button>
+  </nav>
+</header>
+
+<main class="sim">
+  <section class="device-col">
+    <div class="device" id="device">
+      <i class="light" id="light" title="Status light"></i>
+      <button class="side pwr" id="k-power" title="Power key (P)" aria-label="Power key"></button>
+      <button class="side wheel" id="k-wheel" title="Thumb wheel: scroll to roll, click to press (↑ ↓ Esc)" aria-label="Thumb wheel"><span></span></button>
+      <button class="side trade" id="k-trade" title="Trade key (Enter)" aria-label="Trade key"></button>
+      <div class="glass"><canvas id="screen" width="320" height="480"></canvas><div class="off" id="off"></div></div>
+      <div class="boot" id="boot">Loading firmware…</div>
+    </div>
+    <div class="controls">
+      <div class="wheelpad">
+        <button data-in="0" title="Roll up (↑)">▲</button>
+        <button data-in="2" class="press" title="Press the wheel (Esc)">PRESS</button>
+        <button data-in="1" title="Roll down (↓)">▼</button>
+      </div>
+      <button class="tradekey" data-in="3" title="Trade key (Enter / Space)"><i></i>TRADE KEY</button>
+      <button class="ptt" id="ptt" title="Hold to talk (hold M)">HOLD TO TALK</button>
+    </div>
+    <p class="keys">Keyboard: <kbd>↑</kbd><kbd>↓</kbd> roll · <kbd>Esc</kbd> press wheel · <kbd>Enter</kbd> trade key · hold <kbd>M</kbd> to talk · <kbd>P</kbd> power. You can also tap the screen.</p>
+  </section>
+
+  <section class="side-col">
+    <div class="tabs" role="tablist">
+      <button role="tab" class="on" data-tab="phone">Your phone</button>
+      <button role="tab" data-tab="net">Network <span id="net-count"></span></button>
+      <button role="tab" data-tab="about">What's real</button>
+    </div>
+
+    <div class="tab" id="tab-phone">
+      <div class="card">
+        <h3>Main wallets <small>where your money is</small></h3>
+        <div id="wallets"></div>
+      </div>
+
+      <div class="card" id="scan-card">
+        <h3>Link a venue <small>scan the QR on the device</small></h3>
+        <p id="scan-text" class="muted">No QR on the device screen. On the device: Menu → Accounts → pick a venue that isn't linked (Lighter, at first).</p>
+        <div id="scan-detail" hidden></div>
+        <button id="scan" class="primary" disabled>Scan &amp; review</button>
+      </div>
+
+      <div class="card">
+        <h3>Microphone <small>what you say while holding the mic</small></h3>
+        <input id="say" type="text" placeholder="Long SOL, five x, five hundred USDC" autocomplete="off">
+        <div class="chips" id="say-chips"></div>
+        <label class="check"><input type="checkbox" id="use-mic"> Use my real microphone (Chrome speech recognition)</label>
+        <p class="muted small">In a room, the mic posts to the chat. In Ask, it asks the AI. Anywhere else it is the voice shortcut for orders.</p>
+      </div>
+
+      <div class="card warn">
+        <h3>Security check <small>steal the device key</small></h3>
+        <p class="muted">Pretend someone pulled the Hyperliquid key out of the device. Let them try to withdraw your funds with it.</p>
+        <button id="attack" class="bad">Try to withdraw $1,000 with the device key</button>
+        <pre id="attack-out" hidden></pre>
+      </div>
+
+      <div class="card">
+        <h3>Power</h3>
+        <label class="check"><input type="checkbox" id="usb"> USB-C plugged in</label>
+        <p class="muted small" id="batt"></p>
+      </div>
+    </div>
+
+    <div class="tab" id="tab-net" hidden>
+      <div class="net-tools">
+        <label class="check"><input type="checkbox" id="show-poll"> Show polling (prices, balances)</label>
+        <button id="net-clear" class="ghost">Clear</button>
+      </div>
+      <div id="net"></div>
+    </div>
+
+    <div class="tab" id="tab-about" hidden>
+      <div class="card prose">
+        <h3>What runs here</h3>
+        <p><b>The firmware is real.</b> The screen is the Degen Walkie firmware, written in C with LVGL, compiled to WebAssembly from the same source that builds the ESP32-S3 image. The UI, the order tickets, the venue clients and the signing code are the code that ships on the device.</p>
+        <p><b>Signing is real.</b> The device makes its own trading keys. Hyperliquid orders are signed with EIP-712 over a msgpack hash, exactly as Hyperliquid expects. Pacifica requests are signed with Ed25519 over sorted JSON. Watch the Network tab: each signed request shows how the server verified it.</p>
+        <p><b>The servers are mocks.</b> Hyperliquid, Pacifica and Lighter are simulated in this page with their real endpoints and payload shapes. No real money moves. Prices start from Hyperliquid's public prices when your browser can reach them, then follow a random walk. Rooms, news and the AI answers are scripted.</p>
+        <p><b>Known gaps.</b> Lighter signs with Schnorr over Poseidon2; that signer is not ported yet, so the firmware sends an Ed25519 stand-in that the mock accepts. The AI gives preset answers built from your live positions. Voice uses text you type, or your browser's speech recognition.</p>
+        <h3>Try this</h3>
+        <ol>
+          <li>Open <b>Rooms → #SOL</b>, hold the mic and say something.</li>
+          <li>Press the <b>trade key</b> in the room: a ticket opens. Review, then press the trade key again to sign.</li>
+          <li><b>Menu → Accounts → Lighter</b>, then scan the QR with your phone here.</li>
+          <li>Run the <b>security check</b>: the device key can't withdraw.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="fw/walkie.js"></script>
+<script type="module" src="sim.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+# Builds the firmware for both targets on every change: the ESP32-S3 image and the
+# WebAssembly image the simulator runs. Same source, two boards.
+name: firmware
+
+on:
+  push:
+    paths: ['firmware/**', 'simulator/**', '.github/workflows/firmware.yml']
+  pull_request:
+    paths: ['firmware/**', 'simulator/**', '.github/workflows/firmware.yml']
+
+jobs:
+  esp32s3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3.1
+          target: esp32s3
+          path: firmware
+      - uses: actions/upload-artifact@v4
+        with:
+          name: degen-walkie-esp32s3
+          path: |
+            firmware/build/degen_walkie.bin
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+
+  simulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+      - name: LVGL
+        run: git clone --depth 1 -b v9.2.2 https://github.com/lvgl/lvgl.git "$RUNNER_TEMP/lvgl"
+      - name: Firmware → WebAssembly
+        run: LVGL_DIR="$RUNNER_TEMP/lvgl" python firmware/tools/build_sim.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Simulator bundle
+        working-directory: simulator
+        run: npm ci && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: degen-walkie-simulator
+          path: simulator/public

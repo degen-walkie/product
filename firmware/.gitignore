@@ -1,0 +1,5 @@
+build/
+build-sim/
+managed_components/
+sdkconfig
+sdkconfig.old
