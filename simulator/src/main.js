@@ -23,7 +23,7 @@ const set = (k, v) => localStorage.setItem(PAGE + k, v);
 const MODE = params.get('mode') || get('mode', 'demo');            // demo | real
 const NET = MODE === 'real' ? get('net', 'testnet') : 'demo';         // demo | testnet | mainnet
 const NETU = NET.toUpperCase();
-const defaultRelay = /^(localhost|127\.)/.test(location.hostname) ? 'http://localhost:8787/v1' : 'https://relay.degenwalkie.trade/v1';
+const defaultRelay = /^(localhost|127\.)/.test(location.hostname) ? 'http://localhost:8787/v1' : 'https://relay-demo.degenwalkie.trade/v1';
 const RELAY = get('relay', defaultRelay);
 const LINK_URL = new URL('link.html', import.meta.url).href;
 const PLAY = params.get('play');

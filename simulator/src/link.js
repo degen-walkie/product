@@ -4,7 +4,7 @@ import * as W from './wallet.js';
 
 const $ = (id) => document.getElementById(id);
 const link = W.parseLink(location.href);
-const relay = (link && link.relay) || (/^(localhost|127\.)/.test(location.hostname) ? 'http://localhost:8787/v1' : 'https://relay.degenwalkie.trade/v1');
+const relay = (link && link.relay) || (/^(localhost|127\.)/.test(location.hostname) ? 'http://localhost:8787/v1' : 'https://relay-demo.degenwalkie.trade/v1');
 
 if (!link || !link.agent || !link.session) {
   $('detail').innerHTML = '<p class="muted">This link is incomplete. Scan the QR on the device again.</p>';
