@@ -105,5 +105,6 @@ The 8 backlight LEDs run from VSYS through a low-dropout constant-current sink: 
 
 ## Known issues on rev 7
 
+- **VMID not tied to VSYS (board does not power up).** AXP2101 pin 36 (VMID) only goes to C6. The datasheet (Fig. 7-1) ties VMID to VSYS: VBUS reaches the system only through the internal RBFET to VMID. On rev 7, USB gives 5 V on VBUS and 0 V on VSYS. Fix on rev 7: one wire from the VMID end of C6 to the VSYS end of C8 (C5, on VBUS, sits next to C6: don't pick it by mistake). Rev 8 merges the VMID net into VSYS.
 - **Camera FPC clearance.** Five parts in front of the J_CAM opening block the camera cable and are not populated (DNP) on rev 7 boards: R35 (CAM_RESET pull-up), R36 (CAM_PWDN pull-down), C52 and C53 (camera supply decoupling) and R21 (status light blue). CAM_RESET and CAM_PWDN float as a result; check the OV2640 responds on SCCB at bring-up, and wire RESET to CAM_2V8 and PWDN to GND if it does not. The blue status light channel is unused on rev 7. These parts move behind the connector on the next revision.
 - **Pogo pins.** The BOM uses YTC1P-3515-01 (LCSC C5221292), which protrude 0.4 mm from the back cover.
