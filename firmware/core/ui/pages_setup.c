@@ -10,7 +10,7 @@
 
 bool dw_page_is_setup(const dw_page_t *p)
 {
-    return p == &PG_SETUP_LANG || p == &PG_SETUP_WIFI || p == &PG_SETUP_PIN || p == &PG_SETUP_LINK || p == &PG_SETUP_DONE || p == &PG_UNLOCK;
+    return p == &PG_SETUP_LANG || p == &PG_SETUP_WIFI || p == &PG_SETUP_WIFI_PASS || p == &PG_SETUP_PIN || p == &PG_SETUP_LINK || p == &PG_SETUP_DONE || p == &PG_UNLOCK;
 }
 
 static lv_obj_t *step(lv_obj_t *body, int n, const char *title, const char *sub)
@@ -56,7 +56,7 @@ static void lang_pick(int i)
 
 static void lang_build(lv_obj_t *body)
 {
-    step(body, 1, "Hello.", "Pick the language you want to hear the rooms in. Everyone else hears you in theirs.");
+    step(body, 1, "Hello.", "Pick the language you want to hear the rooms in. Everyone else hears you in theirs. The device itself is in English for now.");
     dw_hint("move", NULL, "select", false);
     dw_focus_reset(&s_lang_f, lang_pick);
     lv_obj_t *list = ui_col(body, 0);
@@ -77,45 +77,172 @@ static bool lang_input(dw_input_t in)
 const dw_page_t PG_SETUP_LANG = {.name = "setup-lang", .build = lang_build, .input = lang_input};
 
 /* ======================= 2. Wi-Fi ======================= */
+/* Scan, pick a network (wheel or tap), type the password on the on-screen keyboard. */
 
-static lv_obj_t *s_wifi_state;
-static lv_obj_t *s_wifi_btn;
+static lv_obj_t *s_wifi_state, *s_wifi_list, *s_wifi_btn;
+static lv_timer_t *s_wifi_t;
+static dw_focus_t s_wifi_f;
+static hal_wifi_ap_t s_aps[12];
+static int s_nap;           /* -1 while scanning */
+static char s_pick[33];     /* network waiting for its password */
+
+static void wifi_pick(int i);
+
+static void wifi_list_build(void)
+{
+    lv_obj_clean(s_wifi_list);
+    dw_focus_reset(&s_wifi_f, wifi_pick);
+    char ssid[33], sig[8];
+    hal_wifi_ssid(ssid, sizeof ssid);
+    for (int i = 0; i < s_nap; i++) {
+        int bars = s_aps[i].rssi > -55 ? 4 : s_aps[i].rssi > -65 ? 3 : s_aps[i].rssi > -75 ? 2 : 1;
+        snprintf(sig, sizeof sig, "%.*s", bars, "||||");
+        const char *sub = !strcmp(s_aps[i].ssid, ssid) ? "Connected" : s_aps[i].secure ? "Password" : "Open";
+        dw_focus_add(&s_wifi_f, ui_row(s_wifi_list, s_aps[i].ssid, sub, sig, NULL, false).obj);
+    }
+    lv_obj_t *again = ui_btn(s_wifi_list, "SCAN AGAIN", K_PLAIN);
+    dw_focus_add(&s_wifi_f, again);
+    dw_focus_set(&s_wifi_f, 0);
+}
+
+static void wifi_scan(void)
+{
+    s_nap = -1;
+    lv_obj_clean(s_wifi_list);
+    hal_wifi_scan_start();
+}
+
+static void wifi_pick(int i)
+{
+    if (i >= s_nap) { wifi_scan(); return; }   /* "SCAN AGAIN" */
+    if (!s_aps[i].secure) { hal_wifi_join(s_aps[i].ssid, ""); return; }
+    snprintf(s_pick, sizeof s_pick, "%s", s_aps[i].ssid);
+    dw_nav_push(&PG_SETUP_WIFI_PASS);
+}
 
 static void wifi_update(void)
 {
-    char ssid[40];
-    hal_wifi_ssid(ssid, sizeof ssid);
-    char t[80];
-    if (*ssid && hal_net_up()) snprintf(t, sizeof t, "Connected to %s", ssid);
-    else snprintf(t, sizeof t, "Looking for Wi-Fi\xE2\x80\xA6");
+    if (s_nap < 0 && (s_nap = hal_wifi_scan_results(s_aps, 12)) >= 0) wifi_list_build();
+    char target[33], t[80];
+    hal_wifi_target(target, sizeof target);
+    hal_wifi_state_t st = hal_wifi_state();
+    uint32_t col = C_WARN;
+    if (st == HAL_WIFI_UP) { snprintf(t, sizeof t, "Connected to %s", target); col = C_NEON; }
+    else if (st == HAL_WIFI_CONNECTING) snprintf(t, sizeof t, "Joining %s\xE2\x80\xA6", target);
+    else if (st == HAL_WIFI_FAILED) { snprintf(t, sizeof t, "Couldn't join %s. Check the password.", target); col = C_BAD; }
+    else if (s_nap < 0) snprintf(t, sizeof t, "Looking for Wi-Fi\xE2\x80\xA6");
+    else if (s_nap == 0) snprintf(t, sizeof t, "No networks found.");
+    else snprintf(t, sizeof t, "Pick your network.");
     lv_label_set_text(s_wifi_state, t);
-    lv_obj_set_style_text_color(s_wifi_state, lv_color_hex(*ssid && hal_net_up() ? C_NEON : C_WARN), 0);
+    lv_obj_set_style_text_color(s_wifi_state, lv_color_hex(col), 0);
+    dw_hint(s_nap > 0 ? "move" : NULL, "back", st == HAL_WIFI_UP ? "continue" : s_nap > 0 ? "join" : "skip", false);
+}
+
+static void wifi_tick(lv_timer_t *t)
+{
+    (void)t;
+    wifi_update();
+}
+
+static void wifi_continue(lv_event_t *e)
+{
+    (void)e;
+    dw_nav_replace(&PG_SETUP_PIN);
 }
 
 static void wifi_build(lv_obj_t *body)
 {
     step(body, 2, "Get online.", "The device talks to the venues and the rooms over Wi-Fi. A 4G back-clip works too.");
-    dw_hint(NULL, "back", "continue", false);
     lv_obj_t *c = ui_card(body, K_PLAIN);
     ui_label(c, &dw_mono_9, C_DIM, "NETWORK");
     s_wifi_state = ui_label(c, &dw_sansb_15, C_NEON, "");
-    lv_obj_t *n = ui_label(c, &dw_sans_12, C_MUTE, "Add another network later by scanning its Wi-Fi QR code with the rear camera.");
-    lv_obj_set_width(n, LV_PCT(100));
-    lv_label_set_long_mode(n, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_wifi_state, LV_PCT(100));
+    lv_label_set_long_mode(s_wifi_state, LV_LABEL_LONG_WRAP);
+    s_wifi_list = ui_col(body, 6);
     s_wifi_btn = ui_btn(body, "CONTINUE", K_TRADE);
-    dw_style_focusable(s_wifi_btn);
-    dw_style_focus(s_wifi_btn, true);
+    lv_obj_add_event_cb(s_wifi_btn, wifi_continue, LV_EVENT_CLICKED, NULL);
+    dw_focus_reset(&s_wifi_f, wifi_pick);
+    if (s_nap > 0 && dw_nav_top() == &PG_SETUP_WIFI) wifi_list_build();   /* back from the password page */
+    else wifi_scan();
+    s_wifi_t = lv_timer_create(wifi_tick, 250, NULL);
     wifi_update();
+}
+
+static void wifi_leave(void)
+{
+    if (s_wifi_t) lv_timer_delete(s_wifi_t);
+    s_wifi_t = NULL;
 }
 
 static bool wifi_input(dw_input_t in)
 {
-    if (in == DW_IN_TRADE) { dw_nav_replace(&PG_SETUP_PIN); return true; }
-    if (in == DW_IN_WHEEL_PRESS) { dw_nav_replace(&PG_SETUP_LANG); return true; }
+    switch (in) {
+    case DW_IN_WHEEL_UP: dw_focus_move(&s_wifi_f, -1); return true;
+    case DW_IN_WHEEL_DOWN: dw_focus_move(&s_wifi_f, 1); return true;
+    case DW_IN_TRADE:
+        if (hal_wifi_state() != HAL_WIFI_UP && s_nap > 0) wifi_pick(s_wifi_f.i);
+        else dw_nav_replace(&PG_SETUP_PIN);
+        return true;
+    case DW_IN_WHEEL_PRESS: dw_nav_replace(&PG_SETUP_LANG); return true;
+    default: return true;
+    }
+}
+
+const dw_page_t PG_SETUP_WIFI = {.name = "setup-wifi", .build = wifi_build, .update = wifi_update, .input = wifi_input, .leave = wifi_leave};
+
+/* Password: a text field and LVGL's on-screen keyboard. */
+
+static lv_obj_t *s_pw_ta;
+
+static void pw_close(void *join)
+{
+    static char pw[65];
+    if (join) {
+        snprintf(pw, sizeof pw, "%s", lv_textarea_get_text(s_pw_ta));
+        hal_wifi_join(s_pick, pw);
+    }
+    dw_nav_pop();
+}
+
+/* The keyboard still sends READY/CANCEL on to the text field after this returns,
+   so the page (and the field) must outlive this call: close it on the next tick. */
+static void pw_done(lv_event_t *e)
+{
+    lv_async_call(pw_close, (void *)(intptr_t)(lv_event_get_code(e) == LV_EVENT_READY));
+}
+
+static void pw_build(lv_obj_t *body)
+{
+    dw_bar("WI-FI", "", C_NEON);
+    dw_hint(NULL, "cancel", NULL, false);
+    ui_title(body, s_pick, true);
+    s_pw_ta = lv_textarea_create(body);
+    lv_textarea_set_one_line(s_pw_ta, true);
+    lv_textarea_set_password_mode(s_pw_ta, false);   /* typed on the device itself: show it so typos are visible */
+    lv_textarea_set_placeholder_text(s_pw_ta, "Password");
+    lv_obj_set_width(s_pw_ta, LV_PCT(100));
+    lv_obj_t *kb = lv_keyboard_create(lv_layer_top());
+    lv_obj_set_size(kb, LV_PCT(100), 210);
+    lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_keyboard_set_textarea(kb, s_pw_ta);
+    lv_obj_add_event_cb(kb, pw_done, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(kb, pw_done, LV_EVENT_CANCEL, NULL);
+    lv_obj_set_user_data(s_pw_ta, kb);
+}
+
+static void pw_leave(void)
+{
+    lv_obj_t *kb = lv_obj_get_user_data(s_pw_ta);
+    if (kb) lv_obj_delete_async(kb);
+}
+
+static bool pw_input(dw_input_t in)
+{
+    if (in == DW_IN_WHEEL_PRESS) dw_nav_pop();
     return true;
 }
 
-const dw_page_t PG_SETUP_WIFI = {.name = "setup-wifi", .build = wifi_build, .update = wifi_update, .input = wifi_input};
+const dw_page_t PG_SETUP_WIFI_PASS = {.name = "setup-wifi-pass", .build = pw_build, .input = pw_input, .leave = pw_leave};
 
 /* ======================= 3. PIN ======================= */
 

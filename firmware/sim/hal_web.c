@@ -147,6 +147,36 @@ void hal_wifi_ssid(char *out, size_t cap)
     free(s);
 }
 
+/* The simulator is always online; the scan returns a fixed list and any join succeeds. */
+static char s_join[33];
+static uint32_t s_scan_at;
+
+void hal_wifi_scan_start(void) { s_scan_at = hal_millis(); }
+
+int hal_wifi_scan_results(hal_wifi_ap_t *out, int max)
+{
+    static const hal_wifi_ap_t APS[] = {{"Home-5G", -48, true}, {"Cafe Guest", -67, false}, {"Office", -74, true}};
+    if (hal_millis() - s_scan_at < 1200) return -1;
+    int n = (int)(sizeof APS / sizeof APS[0]);
+    if (n > max) n = max;
+    memcpy(out, APS, n * sizeof *out);
+    return n;
+}
+
+void hal_wifi_join(const char *ssid, const char *password)
+{
+    (void)password;
+    snprintf(s_join, sizeof s_join, "%s", ssid);
+}
+
+hal_wifi_state_t hal_wifi_state(void) { return HAL_WIFI_UP; }
+
+void hal_wifi_target(char *out, size_t cap)
+{
+    if (*s_join) snprintf(out, cap, "%s", s_join);
+    else hal_wifi_ssid(out, cap);
+}
+
 EMSCRIPTEN_KEEPALIVE void dw_sim_voice(char *text)
 {
     dw_app_voice_result(text && *text ? text : NULL);

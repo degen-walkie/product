@@ -75,6 +75,16 @@ void dw_app_voice_result(const char *text);   /* implemented by the core; NULL =
 /* Name of the Wi-Fi network the device is on ("" when offline). */
 void hal_wifi_ssid(char *out, size_t cap);
 
+/* Wi-Fi setup. The scan is asynchronous: start it, then poll for the results.
+ * hal_wifi_join() saves the network and the device rejoins it on every boot. */
+typedef struct { char ssid[33]; int8_t rssi; bool secure; } hal_wifi_ap_t;
+typedef enum { HAL_WIFI_OFF, HAL_WIFI_CONNECTING, HAL_WIFI_UP, HAL_WIFI_FAILED } hal_wifi_state_t;
+void hal_wifi_scan_start(void);
+int hal_wifi_scan_results(hal_wifi_ap_t *out, int max);   /* -1 while the scan runs; strongest first */
+void hal_wifi_join(const char *ssid, const char *password);
+hal_wifi_state_t hal_wifi_state(void);
+void hal_wifi_target(char *out, size_t cap);              /* the network being joined or saved */
+
 /* Text shown as a QR code on the device, exposed so the simulator's "phone" can scan it. */
 void hal_qr_shown(const char *payload);
 

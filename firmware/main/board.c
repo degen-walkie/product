@@ -162,29 +162,43 @@ static void lcd_init(void)
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7796(g_lcd_io, &dev, &g_panel));
     esp_lcd_panel_init(g_panel);
     esp_lcd_panel_invert_color(g_panel, true);
+    esp_lcd_panel_mirror(g_panel, true, false);   /* rev 7 hardware: panel scans right-to-left */
     esp_lcd_panel_disp_on_off(g_panel, true);
 }
 
 static void touch_init(void)
 {
+    /* Goodix reset: INT high through the RST rising edge selects 0x14, then INT low 50 ms, then release. */
+    exp_write(EXP_TP_INT, true);
+    wr(s_exp, 0x06, 0xD4 & ~EXP_TP_INT);   /* TP_INT as output */
     exp_write(EXP_TP_RST, false);
     vTaskDelay(pdMS_TO_TICKS(10));
     exp_write(EXP_TP_RST, true);
-    vTaskDelay(pdMS_TO_TICKS(60));
-    /* TP_INT is pulled up and only readable through the expander, so the GT911
-       comes up on its backup address 0x14. */
-    esp_lcd_panel_io_handle_t io;
-    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    io_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP;
-    io_cfg.scl_speed_hz = 400000;
-    if (esp_lcd_new_panel_io_i2c(g_i2c, &io_cfg, &io) != ESP_OK) return;
+    vTaskDelay(pdMS_TO_TICKS(10));
+    exp_write(EXP_TP_INT, false);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    wr(s_exp, 0x06, 0xD4);                  /* TP_INT back to input */
+    vTaskDelay(pdMS_TO_TICKS(100));
+    /* TP_INT is pulled up, so the GT911 should come up on its backup address 0x14;
+       fall back to 0x5D in case the pull-up loses the race at reset. */
     esp_lcd_touch_config_t cfg = {
         .x_max = LCD_W, .y_max = LCD_H, .rst_gpio_num = GPIO_NUM_NC, .int_gpio_num = GPIO_NUM_NC,
     };
-    if (esp_lcd_touch_new_i2c_gt911(io, &cfg, &g_touch) != ESP_OK) {
-        ESP_LOGW(TAG, "GT911 not found on 0x14");
-        g_touch = NULL;
+    const uint8_t addrs[] = {ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS};
+    for (int i = 0; i < 2; i++) {
+        esp_lcd_panel_io_handle_t io;
+        esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+        io_cfg.dev_addr = addrs[i];
+        io_cfg.scl_speed_hz = 400000;
+        if (esp_lcd_new_panel_io_i2c(g_i2c, &io_cfg, &io) != ESP_OK) continue;
+        if (esp_lcd_touch_new_i2c_gt911(io, &cfg, &g_touch) == ESP_OK) {
+            ESP_LOGI(TAG, "GT911 found on 0x%02x", addrs[i]);
+            return;
+        }
+        esp_lcd_panel_io_del(io);
     }
+    ESP_LOGW(TAG, "GT911 not found on 0x14 or 0x5d");
+    g_touch = NULL;
 }
 
 void board_backlight(uint8_t percent)

@@ -12,6 +12,8 @@
 #define NAV_MAX 10
 
 static lv_obj_t *s_bar_l, *s_bar_s, *s_bar_r, *s_bar_mode, *s_page, *s_hint[3][2], *s_hint_box[3];
+static bool s_hint_tap[3];   /* which hint boxes act as their key when tapped */
+static void hint_click(lv_event_t *e);
 static const dw_page_t *s_stack[NAV_MAX];
 static int s_depth;
 static lv_style_t s_focus, s_chip_on, s_tab_on;
@@ -178,8 +180,17 @@ void dw_ui_init(void)
         lv_obj_align(s_hint[i][0], LV_ALIGN_TOP_MID, 0, 4);
         s_hint[i][1] = ui_label(b, &dw_monob_11, i == 2 ? C_NEON : 0xc5ccd6, "");
         lv_obj_align(s_hint[i][1], LV_ALIGN_BOTTOM_MID, 0, -3);
-        if (i == 0) lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+        if (i > 0) lv_obj_add_event_cb(b, hint_click, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
+}
+
+/* Tapping a hint box does what its key does, so a touch-only device can get through every page.
+   Signing never: a hint marked `sign` (and "cancel all") still needs the physical TRADE key. */
+static void hint_click(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (s_hint_tap[i]) dw_app_input(i == 1 ? DW_IN_WHEEL_PRESS : DW_IN_TRADE);
 }
 
 void dw_bar(const char *label, const char *sub, uint32_t color)
@@ -216,6 +227,8 @@ void dw_hint(const char *roll, const char *press, const char *trade, bool sign)
     }
     lv_obj_set_style_bg_color(s_hint_box[2], C(C_NEON), 0);
     lv_obj_set_style_bg_opa(s_hint_box[2], sign ? 40 : 0, 0);
+    s_hint_tap[1] = press && *press;
+    s_hint_tap[2] = trade && *trade && !sign && strcmp(trade, "cancel all");
 }
 
 /* ---------------- navigation ---------------- */

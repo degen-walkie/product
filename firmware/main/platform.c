@@ -64,7 +64,7 @@ void hal_power(hal_power_t *out)
 bool hal_net_up(void) { return s_net_up; }
 void hal_backlight(bool on) { board_backlight(on ? 80 : 0); }
 void hal_qr_shown(const char *payload) { (void)payload; }
-void hal_wifi_ssid(char *out, size_t cap) { snprintf(out, cap, "%s", s_net_up ? CONFIG_DW_WIFI_SSID : ""); }
+
 
 /* ---------------- status light and motor ----------------
  * Rev 7 has red and green on the expander; blue (AXP2101 CHGLED) is not fitted. */
@@ -294,14 +294,100 @@ void hal_ws_close(int h)
 }
 
 /* ---------------- Wi-Fi + SNTP ----------------
- * Development builds take the network from menuconfig (Degen Walkie → Wi-Fi).
- * The product flow scans a Wi-Fi QR with the rear camera; not in this build yet. */
+ * The network is picked on the device (setup step 2) and saved in NVS. A menuconfig
+ * network (Degen Walkie → Wi-Fi) is only the fallback for development builds. */
+
+#define WIFI_RETRIES 5
+static char s_ssid[33];
+static volatile hal_wifi_state_t s_wifi = HAL_WIFI_OFF;
+static volatile bool s_scanning;
+static volatile int s_nap = -1;
+static hal_wifi_ap_t s_aps[16];
+static wifi_ap_record_t s_rec[24];   /* static: too big for the event task stack */
+static int s_retries;
+static esp_timer_handle_t s_retry_t;
+
+static void wifi_retry(void *arg)
+{
+    (void)arg;
+    if (*s_ssid && !s_net_up && !s_scanning) { s_retries = 0; s_wifi = HAL_WIFI_CONNECTING; esp_wifi_connect(); }
+}
+
+static void scan_done(void)
+{
+    uint16_t n = sizeof s_rec / sizeof s_rec[0];
+    if (esp_wifi_scan_get_ap_records(&n, s_rec) != ESP_OK) n = 0;
+    int k = 0;
+    for (int i = 0; i < n && k < (int)(sizeof s_aps / sizeof s_aps[0]); i++) {   /* records come strongest first */
+        const char *id = (const char *)s_rec[i].ssid;
+        if (!*id) continue;
+        bool dup = false;
+        for (int j = 0; j < k && !dup; j++) dup = !strcmp(s_aps[j].ssid, id);
+        if (dup) continue;
+        strlcpy(s_aps[k].ssid, id, sizeof s_aps[k].ssid);
+        s_aps[k].rssi = s_rec[i].rssi;
+        s_aps[k].secure = s_rec[i].authmode != WIFI_AUTH_OPEN;
+        k++;
+    }
+    s_nap = k;
+    s_scanning = false;
+    wifi_retry(NULL);
+}
 
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) esp_wifi_connect();
-    else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) { s_net_up = false; esp_wifi_connect(); }
-    else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) { s_net_up = true; ESP_LOGI(TAG, "online"); }
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        wifi_retry(NULL);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        s_net_up = false;
+        if (s_scanning || !*s_ssid) return;
+        if (++s_retries <= WIFI_RETRIES) { s_wifi = HAL_WIFI_CONNECTING; esp_wifi_connect(); }
+        else { s_wifi = HAL_WIFI_FAILED; esp_timer_start_once(s_retry_t, 30 * 1000000); }
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        scan_done();
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        s_net_up = true;
+        s_retries = 0;
+        s_wifi = HAL_WIFI_UP;
+        ESP_LOGI(TAG, "online on %s", s_ssid);
+    }
+}
+
+void hal_wifi_ssid(char *out, size_t cap) { snprintf(out, cap, "%s", s_net_up ? s_ssid : ""); }
+void hal_wifi_target(char *out, size_t cap) { snprintf(out, cap, "%s", s_ssid); }
+hal_wifi_state_t hal_wifi_state(void) { return s_wifi; }
+
+void hal_wifi_scan_start(void)
+{
+    if (s_scanning) return;
+    s_nap = -1;
+    s_scanning = true;
+    if (!s_net_up) esp_wifi_disconnect();   /* a connect attempt in flight blocks the scan */
+    if (esp_wifi_scan_start(NULL, false) != ESP_OK) { s_nap = 0; s_scanning = false; }
+}
+
+int hal_wifi_scan_results(hal_wifi_ap_t *out, int max)
+{
+    if (s_nap < 0) return -1;
+    int n = s_nap < max ? s_nap : max;
+    memcpy(out, s_aps, n * sizeof *out);
+    return n;
+}
+
+void hal_wifi_join(const char *ssid, const char *password)
+{
+    strlcpy(s_ssid, ssid, sizeof s_ssid);
+    hal_store_set("wifi.ssid", ssid);
+    hal_store_set("wifi.pass", password);
+    wifi_config_t wc = {0};
+    strlcpy((char *)wc.sta.ssid, ssid, sizeof wc.sta.ssid);
+    strlcpy((char *)wc.sta.password, password, sizeof wc.sta.password);
+    esp_timer_stop(s_retry_t);
+    s_retries = 0;
+    s_wifi = HAL_WIFI_CONNECTING;
+    esp_wifi_disconnect();
+    esp_wifi_set_config(WIFI_IF_STA, &wc);
+    esp_wifi_connect();
 }
 
 static void wifi_init(void)
@@ -313,9 +399,18 @@ static void wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_init(&ic));
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, NULL);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, NULL);
+    esp_timer_create_args_t r = {.callback = wifi_retry, .name = "wifi"};
+    esp_timer_create(&r, &s_retry_t);
+    char pass[65] = "";
+    if (hal_store_get("wifi.ssid", s_ssid, sizeof s_ssid) <= 0) {
+        strlcpy(s_ssid, CONFIG_DW_WIFI_SSID, sizeof s_ssid);
+        strlcpy(pass, CONFIG_DW_WIFI_PASSWORD, sizeof pass);
+    } else {
+        hal_store_get("wifi.pass", pass, sizeof pass);
+    }
     wifi_config_t wc = {0};
-    strlcpy((char *)wc.sta.ssid, CONFIG_DW_WIFI_SSID, sizeof wc.sta.ssid);
-    strlcpy((char *)wc.sta.password, CONFIG_DW_WIFI_PASSWORD, sizeof wc.sta.password);
+    strlcpy((char *)wc.sta.ssid, s_ssid, sizeof wc.sta.ssid);
+    strlcpy((char *)wc.sta.password, pass, sizeof wc.sta.password);
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_set_config(WIFI_IF_STA, &wc);
     esp_wifi_start();

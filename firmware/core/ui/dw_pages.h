@@ -2,7 +2,7 @@
 #include "dw_model.h"
 #include "dw_ui.h"
 
-extern const dw_page_t PG_SETUP_LANG, PG_SETUP_WIFI, PG_SETUP_PIN, PG_SETUP_LINK, PG_SETUP_DONE, PG_UNLOCK;
+extern const dw_page_t PG_SETUP_LANG, PG_SETUP_WIFI, PG_SETUP_WIFI_PASS, PG_SETUP_PIN, PG_SETUP_LINK, PG_SETUP_DONE, PG_UNLOCK;
 bool dw_pin_set(void);
 extern const dw_page_t PG_BOOT, PG_ROOMS, PG_ROOM, PG_MENU, PG_MARKETS, PG_CHART, PG_POSITIONS, PG_NEWS, PG_TICKET,
     PG_ASK, PG_VOICE, PG_ACCOUNTS, PG_LINK, PG_REVOKE, PG_DEVICE;
