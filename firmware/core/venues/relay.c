@@ -90,6 +90,29 @@ static void on_history(void *ctx, int status, cJSON *root)
     dw_model_touch();
 }
 
+/* Who we are to the rooms: the first linked account, and the language picked at setup. */
+static const char *my_addr(void)
+{
+    for (int v = 0; v < V_COUNT; v++)
+        if (g_model.acct[v].linked && g_model.acct[v].account[0]) return g_model.acct[v].account;
+    return "";
+}
+
+static const char *my_lang(void)
+{
+    static char lang[8];
+    if (hal_store_get("lang", lang, sizeof lang) <= 0) strcpy(lang, "EN");
+    return lang;
+}
+
+static void send_hello(void)
+{
+    if (!s_ws_open) return;
+    char buf[160];
+    snprintf(buf, sizeof buf, "{\"op\":\"hello\",\"addr\":\"%s\",\"lang\":\"%s\"}", my_addr(), my_lang());
+    hal_ws_send(s_ws, buf);
+}
+
 static void send_join(void)
 {
     if (!s_ws_open || !g_model.room_id[0]) return;
@@ -122,22 +145,22 @@ static void on_ws_state(void *ctx, int open)
 {
     (void)ctx;
     s_ws_open = open;
-    if (open) send_join();
+    if (open) { send_hello(); send_join(); }
 }
 
 void dw_relay_start(void)
 {
-    if (s_ws < 0) s_ws = hal_ws_open(DW_RELAY_WS, on_ws, on_ws_state, NULL);
+    if (s_ws < 0) s_ws = hal_ws_open(dw_url(U_RELAY_WS), on_ws, on_ws_state, NULL);
     s_rooms_at = 0;
     dw_relay_poll();
-    dw_http_json("GET", DW_RELAY_API "/news", NULL, NULL, on_news, NULL);
+    dw_http_json("GET", dw_urlf(U_RELAY, "/news"), NULL, NULL, on_news, NULL);
 }
 
 void dw_relay_poll(void)
 {
     if (!s_rooms_at || hal_millis() - s_rooms_at > 20000) {
         s_rooms_at = hal_millis();
-        dw_http_json("GET", DW_RELAY_API "/rooms", NULL, NULL, on_rooms, NULL);
+        dw_http_json("GET", dw_urlf(U_RELAY, "/rooms"), NULL, NULL, on_rooms, NULL);
     }
 }
 
@@ -145,9 +168,10 @@ void dw_relay_join(const char *room_id)
 {
     if (!strcmp(g_model.room_id, room_id) && g_model.nmsgs) return;
     snprintf(g_model.room_id, sizeof g_model.room_id, "%s", room_id);
+    send_hello();   /* the account may have been linked since we connected */
     g_model.nmsgs = 0;
     char url[160];
-    snprintf(url, sizeof url, DW_RELAY_API "/rooms/%s/history", room_id);
+    snprintf(url, sizeof url, "%s" "/rooms/%s/history?lang=%s", dw_url(U_RELAY), room_id, my_lang());
     dw_http_json("GET", url, NULL, NULL, on_history, NULL);
     send_join();
 }
@@ -158,7 +182,8 @@ void dw_relay_say(const char *text)
     cJSON_AddStringToObject(o, "op", "say");
     cJSON_AddStringToObject(o, "room", g_model.room_id);
     cJSON_AddStringToObject(o, "text", text);
-    cJSON_AddStringToObject(o, "lang", "EN");
+    cJSON_AddStringToObject(o, "lang", my_lang());
+    cJSON_AddStringToObject(o, "addr", my_addr());
     char *s = cJSON_PrintUnformatted(o);
     if (s_ws_open && s) hal_ws_send(s_ws, s);
     cJSON_free(s);
@@ -185,7 +210,7 @@ int dw_relay_ask(const char *question, dw_text_cb cb, void *ctx)
     a->ctx = ctx;
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "q", question);
-    cJSON_AddStringToObject(o, "lang", "en");
+    cJSON_AddStringToObject(o, "lang", my_lang());
     cJSON *pos = cJSON_AddArrayToObject(o, "positions");
     for (int i = 0; i < g_model.npos; i++) {
         dw_pos_t *p = &g_model.pos[i];
@@ -208,7 +233,7 @@ int dw_relay_ask(const char *question, dw_text_cb cb, void *ctx)
     cJSON_AddNumberToObject(o, "equity", eq);
     char *body = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
-    int rc = dw_http_json("POST", DW_RELAY_API "/ask", NULL, body, on_answer, a);
+    int rc = dw_http_json("POST", dw_urlf(U_RELAY, "/ask"), NULL, body, on_answer, a);
     cJSON_free(body);
     if (rc < 0) free(a);
     return rc;
@@ -236,7 +261,7 @@ int dw_relay_link_poll(const char *session, dw_link_cb cb, void *ctx)
     l->cb = cb;
     l->ctx = ctx;
     char url[160];
-    snprintf(url, sizeof url, DW_RELAY_API "/link/%s", session);
+    snprintf(url, sizeof url, "%s" "/link/%s", dw_url(U_RELAY), session);
     int rc = dw_http_json("GET", url, NULL, NULL, on_link, l);
     if (rc < 0) free(l);
     return rc;

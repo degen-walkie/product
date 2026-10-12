@@ -1,16 +1,23 @@
 // The board, as far as the firmware can tell: display, keys, status light, battery,
 // storage, network and mic. Implements Module.dwHost for sim/hal_web.c.
+//
+// Storage is namespaced per mode (demo / testnet / mainnet), so the keys a device made
+// on testnet never mix with the demo's. A few keys are answered by the page itself:
+// net.mode, relay.url, link.url and boot.off.
 import { http, socket } from './net.js';
 
 const LED = ['off', 'green', 'blue', 'red', 'yellow', 'purple'];
 const MODE = ['solid', 'blink', 'slow'];
-export const IN = { UP: 0, DOWN: 1, PRESS: 2, TRADE: 3, POWER: 4, PTT_DOWN: 5, PTT_UP: 6 };
+export const IN = { UP: 0, DOWN: 1, PRESS: 2, TRADE: 3, POWER: 4, PTT_DOWN: 5, PTT_UP: 6, POWER_HOLD: 7 };
 
-export function createHost(ui) {
+export const storeKey = (ns, k) => `dw.fw.${ns}.${k}`;
+
+export function createHost(ui, cfg) {
   let M = null;
   const sockets = new Map();
   let battery = 86, charging = false;
   let frameQueued = false;
+  let bootOff = !!cfg.bootOff;
 
   const toC = (s) => (s === null || s === undefined ? 0 : M.stringToNewUTF8(s));
 
@@ -34,6 +41,7 @@ export function createHost(ui) {
     vibrate(ms) { ui.vibrate(ms); },
     backlight(on) { ui.backlight(!!on); },
     power() { return Math.round(battery) | (charging ? 1 << 8 : 0) | (charging ? 1 << 9 : 0); },
+    ssid() { return cfg.ssid || 'Home-5G'; },
     http(id, method, url, headers, body) {
       http(method, url, headers, body).then(({ status, body: text }) => {
         const p = text ? M.stringToNewUTF8(text) : 0;
@@ -46,8 +54,19 @@ export function createHost(ui) {
     },
     wsSend(id, text) { sockets.get(id)?.send(text); },
     wsClose(id) { sockets.get(id)?.close(); sockets.delete(id); },
-    storeGet(k) { return localStorage.getItem('dw.fw.' + k); },
-    storeSet(k, v) { if (v === null) localStorage.removeItem('dw.fw.' + k); else localStorage.setItem('dw.fw.' + k, v); },
+    storeGet(k) {
+      if (k === 'net.mode') return cfg.ns;
+      if (k === 'relay.url') return cfg.relayUrl || null;
+      if (k === 'link.url') return cfg.linkUrl || null;
+      if (k === 'boot.off') return bootOff ? '1' : null;
+      return localStorage.getItem(storeKey(cfg.ns, k));
+    },
+    storeSet(k, v) {
+      if (k === 'boot.off') { bootOff = !!v; return; }
+      if (v === null) localStorage.removeItem(storeKey(cfg.ns, k));
+      else localStorage.setItem(storeKey(cfg.ns, k), v);
+      ui.stored && ui.stored(k, v);
+    },
     voice(on) {
       if (on) ui.listen(true);
       else ui.listen(false).then((text) => M._dw_sim_voice(toC(text || '')));

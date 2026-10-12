@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Degen Walkie Simulator</title>
-<meta name="description" content="The Degen Walkie firmware compiled to WebAssembly, trading against mock Hyperliquid, Pacifica and Lighter servers.">
+<meta name="description" content="The Degen Walkie firmware in your browser: watch the demos, or trade for real on Hyperliquid and Pacifica testnet.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -15,104 +15,163 @@
 <header class="top">
   <a class="brand" href="https://degenwalkie.trade/"><b>DEGEN</b> <span>WALKIE</span></a>
   <span class="tag">Simulator</span>
-  <span class="badge"><i></i>Real firmware · WebAssembly · mock venues</span>
+  <div class="switch" id="mode-switch" role="tablist" aria-label="Mode">
+    <button data-mode="demo">Demo</button>
+    <button data-mode="real">Real</button>
+  </div>
+  <div class="switch net" id="net-switch" role="tablist" aria-label="Network" hidden>
+    <button data-net="testnet">Testnet</button>
+    <button data-net="mainnet">Mainnet</button>
+  </div>
+  <a class="guide" id="guide" href="https://github.com/degen-walkie/product/blob/main/docs/real-trading.md" target="_blank" rel="noopener">How to trade for real →</a>
   <nav>
     <a href="https://degenwalkie.trade/">Website</a>
-    <a href="https://github.com/degen-walkie/product/tree/main/firmware">Firmware source</a>
-    <button id="reset" class="ghost" title="Erase the device keys, wallets and book">Reset</button>
+    <a href="https://github.com/degen-walkie/product/tree/main/firmware" target="_blank" rel="noopener">Source</a>
   </nav>
 </header>
+<div class="banner" id="banner" hidden></div>
 
 <main class="sim">
   <section class="device-col">
     <div class="device" id="device">
       <i class="light" id="light" title="Status light"></i>
-      <button class="side pwr" id="k-power" title="Power key (P)" aria-label="Power key"></button>
-      <button class="side wheel" id="k-wheel" title="Thumb wheel: scroll to roll, click to press (↑ ↓ Esc)" aria-label="Thumb wheel"><span></span></button>
-      <button class="side trade" id="k-trade" title="Trade key (Enter)" aria-label="Trade key"></button>
-      <div class="glass"><canvas id="screen" width="320" height="480"></canvas><div class="off" id="off"></div></div>
+      <button class="side pwr" id="k-power" title="Power key: click = short press, hold = long press" aria-label="Power key"></button>
+      <button class="side wheel" id="k-wheel" title="Thumb wheel: scroll to roll, click to press" aria-label="Thumb wheel"><span></span></button>
+      <button class="side trade" id="k-trade" title="Trade key" aria-label="Trade key"></button>
+      <div class="glass"><canvas id="screen" width="320" height="480"></canvas><div class="fx" id="fx"></div><div class="off" id="off"></div></div>
       <div class="boot" id="boot">Loading firmware…</div>
+      <div class="callouts" id="callouts"></div>
+      <div class="lock" id="lock" hidden></div>
     </div>
-    <div class="controls">
-      <div class="wheelpad">
-        <button data-in="0" title="Roll up (↑)">▲</button>
-        <button data-in="2" class="press" title="Press the wheel (Esc)">PRESS</button>
-        <button data-in="1" title="Roll down (↓)">▼</button>
-      </div>
-      <button class="tradekey" data-in="3" title="Trade key (Enter / Space)"><i></i>TRADE KEY</button>
-      <button class="ptt" id="ptt" title="Hold to talk (hold M)">HOLD TO TALK</button>
+    <div class="caption" id="caption" hidden></div>
+    <div class="bar" id="bar">
+      <button data-in="0" title="Roll the wheel up (↑)"><b>▲</b><small>Up</small></button>
+      <button data-in="1" title="Roll the wheel down (↓)"><b>▼</b><small>Down</small></button>
+      <button data-in="2" title="Press the wheel: back (Esc)"><b>⟵</b><small>Back</small></button>
+      <button data-in="3" class="enter" title="Trade key: open, enter, sign (Enter)"><b>⏎</b><small>Enter</small></button>
+      <button id="ptt" class="ptt" title="Hold to talk (hold M)"><b>●</b><small>Talk</small></button>
+      <button data-in="4" title="Power key, short press: screen off / on (P)"><b>⏻</b><small>Power</small></button>
+      <button data-in="7" title="Power key held 2 s: power on, or the power-off sheet (Shift+P)"><b>⏻⏻</b><small>Hold pwr</small></button>
     </div>
-    <p class="keys">Keyboard: <kbd>↑</kbd><kbd>↓</kbd> roll · <kbd>Esc</kbd> press wheel · <kbd>Enter</kbd> trade key · hold <kbd>M</kbd> to talk · <kbd>P</kbd> power. You can also tap the screen.</p>
+    <p class="keys" id="keys">Keys: <kbd>↑</kbd><kbd>↓</kbd> roll · <kbd>Enter</kbd> trade key · <kbd>Esc</kbd> back · hold <kbd>M</kbd> talk · <kbd>P</kbd> power · <kbd>Shift</kbd>+<kbd>P</kbd> hold power. Swipe and tap on the screen.</p>
   </section>
 
   <section class="side-col">
-    <div class="tabs" role="tablist">
-      <button role="tab" class="on" data-tab="phone">Your phone</button>
-      <button role="tab" data-tab="net">Network <span id="net-count"></span></button>
-      <button role="tab" data-tab="about">What's real</button>
-    </div>
-
-    <div class="tab" id="tab-phone">
+    <!-- DEMO -->
+    <div id="demo-panel">
+      <div class="card hero">
+        <h3>Watch it work <small>scripted demos on the real firmware</small></h3>
+        <div class="player">
+          <select id="demo-sel" aria-label="Demo"></select>
+          <button id="play" class="primary">▶ Play</button>
+        </div>
+        <p class="muted" id="demo-blurb"></p>
+        <ol class="steps" id="steps"></ol>
+      </div>
       <div class="card">
-        <h3>Main wallets <small>where your money is</small></h3>
-        <div id="wallets"></div>
+        <h3>Want to press the buttons? <small>real mode</small></h3>
+        <p class="muted">Switch to <b>Real</b> at the top: you get the device fresh out of the box, set it up, link your own wallets and trade on Hyperliquid and Pacifica testnet.</p>
+        <a class="ghost-link" href="https://github.com/degen-walkie/product/blob/main/docs/real-trading.md" target="_blank" rel="noopener">Step-by-step guide →</a>
       </div>
-
-      <div class="card" id="scan-card">
-        <h3>Link a venue <small>scan the QR on the device</small></h3>
-        <p id="scan-text" class="muted">No QR on the device screen. On the device: Menu → Accounts → pick a venue that isn't linked (Lighter, at first).</p>
-        <div id="scan-detail" hidden></div>
-        <button id="scan" class="primary" disabled>Scan &amp; review</button>
-      </div>
-
-      <div class="card">
-        <h3>Microphone <small>what you say while holding the mic</small></h3>
-        <input id="say" type="text" placeholder="Long SOL, five x, five hundred USDC" autocomplete="off">
-        <div class="chips" id="say-chips"></div>
-        <label class="check"><input type="checkbox" id="use-mic"> Use my real microphone (Chrome speech recognition)</label>
-        <p class="muted small">In a room, the mic posts to the chat. In Ask, it asks the AI. Anywhere else it is the voice shortcut for orders.</p>
-      </div>
-
       <div class="card warn">
         <h3>Security check <small>steal the device key</small></h3>
-        <p class="muted">Pretend someone pulled the Hyperliquid key out of the device. Let them try to withdraw your funds with it.</p>
+        <p class="muted">Take the Hyperliquid key out of the demo device and try to withdraw with it.</p>
         <button id="attack" class="bad">Try to withdraw $1,000 with the device key</button>
         <pre id="attack-out" hidden></pre>
       </div>
-
-      <div class="card">
-        <h3>Power</h3>
-        <label class="check"><input type="checkbox" id="usb"> USB-C plugged in</label>
-        <p class="muted small" id="batt"></p>
-      </div>
     </div>
 
-    <div class="tab" id="tab-net" hidden>
-      <div class="net-tools">
-        <label class="check"><input type="checkbox" id="show-poll"> Show polling (prices, balances)</label>
-        <button id="net-clear" class="ghost">Clear</button>
+    <!-- REAL -->
+    <div id="real-panel" hidden>
+      <div class="tabs" role="tablist">
+        <button role="tab" class="on" data-tab="start">Get started</button>
+        <button role="tab" data-tab="wallets">Wallets</button>
+        <button role="tab" data-tab="mic">Mic</button>
+        <button role="tab" data-tab="net">Network <span id="net-count"></span></button>
+        <button role="tab" data-tab="settings">Settings</button>
       </div>
-      <div id="net"></div>
-    </div>
 
-    <div class="tab" id="tab-about" hidden>
-      <div class="card prose">
-        <h3>What runs here</h3>
-        <p><b>The firmware is real.</b> The screen is the Degen Walkie firmware, written in C with LVGL, compiled to WebAssembly from the same source that builds the ESP32-S3 image. The UI, the order tickets, the venue clients and the signing code are the code that ships on the device.</p>
-        <p><b>Signing is real.</b> The device makes its own trading keys. Hyperliquid orders are signed with EIP-712 over a msgpack hash, exactly as Hyperliquid expects. Pacifica requests are signed with Ed25519 over sorted JSON. Watch the Network tab: each signed request shows how the server verified it.</p>
-        <p><b>The servers are mocks.</b> Hyperliquid, Pacifica and Lighter are simulated in this page with their real endpoints and payload shapes. No real money moves. Prices start from Hyperliquid's public prices when your browser can reach them, then follow a random walk. Rooms, news and the AI answers are scripted.</p>
-        <p><b>Known gaps.</b> Lighter signs with Schnorr over Poseidon2; that signer is not ported yet, so the firmware sends an Ed25519 stand-in that the mock accepts. The AI gives preset answers built from your live positions. Voice uses text you type, or your browser's speech recognition.</p>
-        <h3>Try this</h3>
-        <ol>
-          <li>Open <b>Rooms → #SOL</b>, hold the mic and say something.</li>
-          <li>Press the <b>trade key</b> in the room: a ticket opens. Review, then press the trade key again to sign.</li>
-          <li><b>Menu → Accounts → Lighter</b>, then scan the QR with your phone here.</li>
-          <li>Run the <b>security check</b>: the device key can't withdraw.</li>
-        </ol>
+      <div class="tab" id="tab-start">
+        <div class="card">
+          <h3>From the box to a real trade <small id="net-label">testnet</small></h3>
+          <ol class="checklist" id="checklist">
+            <li data-k="on"><b>Turn it on.</b> Hold the power key (or <em>Hold power</em> below the device).</li>
+            <li data-k="setup"><b>Set it up.</b> Language, Wi-Fi, PIN.</li>
+            <li data-k="funds"><b>Get test USDC.</b> <span id="faucets"></span></li>
+            <li data-k="link"><b>Link a venue.</b> On the device: setup step 4, or Menu → Accounts. Approve the QR in the <em>Wallets</em> tab, or scan it with your phone.</li>
+            <li data-k="trade"><b>Trade.</b> Open a room, press Enter (the trade key), review, press Enter again to sign.</li>
+          </ol>
+          <a class="ghost-link" href="https://github.com/degen-walkie/product/blob/main/docs/real-trading.md" target="_blank" rel="noopener">Full guide with screenshots →</a>
+        </div>
+        <div class="card" id="relay-card">
+          <h3>Relay <small>rooms, news, AI, linking</small></h3>
+          <p class="muted" id="relay-status">Checking…</p>
+        </div>
+      </div>
+
+      <div class="tab" id="tab-wallets" hidden>
+        <div class="card">
+          <h3>Your main wallets <small>where the money stays</small></h3>
+          <div class="wallet"><b>Hyperliquid</b><code id="w-hl">not connected</code><span class="eq" id="eq-hl"></span>
+            <button class="ghost" id="c-hl">Connect EVM wallet</button></div>
+          <div class="wallet"><b>Pacifica</b><code id="w-pac">not connected</code><span class="eq" id="eq-pac"></span>
+            <button class="ghost" id="c-pac">Connect Solana wallet</button></div>
+          <div class="wallet locked"><b>Lighter</b><code>coming soon</code><span class="eq"></span></div>
+        </div>
+        <div class="card" id="scan-card">
+          <h3>Approve the device key <small>what the QR asks for</small></h3>
+          <p class="muted" id="scan-text">No QR on the device yet. On the device: setup step 4, or Menu → Accounts → a venue.</p>
+          <div id="scan-detail" hidden></div>
+          <button id="scan" class="primary" disabled>Approve with my wallet</button>
+          <pre id="scan-log" hidden></pre>
+        </div>
+      </div>
+
+      <div class="tab" id="tab-mic" hidden>
+        <div class="card">
+          <h3>Microphone <small>what you say while holding the mic</small></h3>
+          <input id="say" type="text" placeholder="Long SOL, five x, fifty USDC" autocomplete="off">
+          <div class="chips" id="say-chips"></div>
+          <label class="check"><input type="checkbox" id="use-mic"> Use my real microphone (browser speech recognition)</label>
+          <p class="muted small">In a room, the mic posts to the chat. In Ask, it asks the AI. Anywhere else it is the voice shortcut for orders.</p>
+        </div>
+      </div>
+
+      <div class="tab" id="tab-net" hidden>
+        <div class="net-tools">
+          <label class="check"><input type="checkbox" id="show-poll"> Show polling</label>
+          <button id="net-clear" class="ghost">Clear</button>
+        </div>
+        <div id="net"></div>
+      </div>
+
+      <div class="tab" id="tab-settings" hidden>
+        <div class="card">
+          <h3>Relay server</h3>
+          <input id="relay-url" type="text" autocomplete="off">
+          <p class="muted small">Rooms, news, the AI and the QR handshake. The hosted relay is the default; change it only if you were given another one.</p>
+          <button id="relay-save" class="ghost">Save and restart the device</button>
+        </div>
+        <div class="card warn">
+          <h3>Factory reset <small id="reset-net"></small></h3>
+          <p class="muted">Erases this simulated device's keys, PIN and settings for this network. Your venue accounts and funds are untouched; revoke old keys from your wallet if you like.</p>
+          <button id="factory" class="bad">Factory reset</button>
+        </div>
       </div>
     </div>
   </section>
 </main>
+
+<dialog id="mainnet-dlg">
+  <h3>Use mainnet? Real money.</h3>
+  <p>Degen Walkie is in development and has not been audited. On mainnet, every order the simulator signs is a real order with your real funds.</p>
+  <ul>
+    <li>Use a fresh account with a small amount you can afford to lose.</li>
+    <li>The device key can trade but cannot withdraw. You can revoke it from your wallet at any time.</li>
+  </ul>
+  <label class="check"><input type="checkbox" id="mainnet-ok"> I understand the risk.</label>
+  <div class="dlg-btns"><button class="ghost" id="mainnet-cancel">Stay on testnet</button><button class="bad" id="mainnet-go" disabled>Switch to mainnet</button></div>
+</dialog>
 
 <script src="fw/walkie.js"></script>
 <script type="module" src="sim.js"></script>

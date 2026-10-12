@@ -85,8 +85,10 @@ static void input_task(void *arg)
         if (sw && !sw_was) platform_post(post_input, (void *)(intptr_t)DW_IN_WHEEL_PRESS);
         trade_was = trade;
         sw_was = sw;
-        if (++n % 25 == 0 && !(e & EXP_AXP_IRQ) && axp_power_key_pressed())
-            platform_post(post_input, (void *)(intptr_t)DW_IN_POWER);
+        if (++n % 25 == 0 && !(e & EXP_AXP_IRQ)) {
+            int k = axp_power_key();
+            if (k) platform_post(post_input, (void *)(intptr_t)(k == 2 ? DW_IN_POWER_HOLD : DW_IN_POWER));
+        }
         vTaskDelay(pdMS_TO_TICKS(4));
     }
 }

@@ -57,7 +57,13 @@ function info(body) {
     case 'allMids': return Object.fromEntries(mk.COINS.map((c) => [c, str(mk.mid(c, 'hl'), 4)]));
     case 'clearinghouseState': return state(body.user);
     case 'openOrders':
-      return L.account('hl', body.user.toLowerCase()).orders.map((o) => ({ coin: o.coin, side: o.buy ? 'B' : 'A', limitPx: str(o.px, 4), sz: str(o.sz, 5), oid: o.oid, timestamp: o.t, origSz: str(o.sz, 5) }));
+    case 'frontendOpenOrders':
+      return L.account('hl', body.user.toLowerCase()).orders.map((o) => {
+        const trig = o.kind === 'TP' || o.kind === 'SL';
+        return { coin: o.coin, side: o.buy ? 'B' : 'A', limitPx: str(o.px, 4), sz: str(o.sz, 5), oid: o.oid, timestamp: o.t, origSz: str(o.sz, 5),
+          isTrigger: trig, triggerPx: trig ? str(o.px, 4) : '0.0', triggerCondition: trig ? (o.kind === 'TP' ? 'Price above' : 'Price below') : 'N/A',
+          orderType: o.kind === 'TP' ? 'Take Profit Market' : o.kind === 'SL' ? 'Stop Market' : 'Limit', reduceOnly: trig, isPositionTpsl: trig, tif: trig ? null : 'Gtc' };
+      });
     case 'extraAgents':
       return Object.entries(db().agents).filter(([, v]) => v.user === body.user.toLowerCase()).map(([address, v]) => ({ address, name: v.name, validUntil: v.validUntil }));
     case 'candleSnapshot': {
@@ -146,6 +152,18 @@ function exchange(body, note) {
   if (action.type === 'cancel') {
     acct.orders = acct.orders.filter((o) => !action.cancels.some((c) => c.o === o.oid));
     return { status: 'ok', response: { type: 'cancel', data: { statuses: action.cancels.map(() => 'success') } } };
+  }
+  if (action.type === 'order' && action.grouping === 'positionTpsl') {
+    const statuses = action.orders.map((o) => {
+      const coin = NAMES[o.a];
+      const trig = o.t && o.t.trigger;
+      if (!trig) return { error: 'positionTpsl orders must be triggers.' };
+      if (!acct.positions[coin]) return { error: `No position to attach TP/SL to. asset=${o.a}` };
+      L.rest(acct, coin, o.b, +o.s, +trig.triggerPx, trig.tpsl === 'tp' ? 'TP' : 'SL');
+      note(`${trig.tpsl.toUpperCase()} trigger at ${trig.triggerPx} (market, reduce-only) resting for ${coin}`);
+      return 'waitingForTrigger';
+    });
+    return { status: 'ok', response: { type: 'order', data: { statuses } } };
   }
   if (action.type === 'order') {
     const statuses = action.orders.map((o) => {

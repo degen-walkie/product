@@ -46,7 +46,7 @@ EMSCRIPTEN_KEEPALIVE void dw_sim_touch(int x, int y, int down)
     s_down = down != 0;
 }
 
-/* 0 wheel up, 1 wheel down, 2 wheel press, 3 trade, 4 power, 5 ptt down, 6 ptt up */
+/* 0 wheel up, 1 wheel down, 2 wheel press, 3 trade, 4 power, 5 ptt down, 6 ptt up, 7 power held */
 EMSCRIPTEN_KEEPALIVE void dw_sim_input(int code) { dw_app_input((dw_input_t)code); }
 
 static void loop(void) { lv_timer_handler(); }

@@ -39,7 +39,8 @@ static void two_tone_set(lv_obj_t *sg, const char *a, const char *b, uint32_t bc
 static void boot_done(lv_timer_t *t)
 {
     (void)t;
-    dw_nav_root(&PG_ROOMS);
+    if (dw_nav_top() != &PG_BOOT) return;   /* powered off during the animation */
+    dw_nav_root(!dw_app_setup_done() ? &PG_SETUP_LANG : dw_pin_set() ? &PG_UNLOCK : &PG_ROOMS);
 }
 
 static void boot_build(lv_obj_t *body)
@@ -64,7 +65,7 @@ static dw_focus_t s_menu_f;
 static const struct { const char *t, *s; const dw_page_t *p; } MENU[] = {
     {"Rooms", "LIVE ROOMS \xC2\xB7 ONE PER TICKER", &PG_ROOMS},
     {"Positions", "EQUITY \xC2\xB7 3 VENUES", &PG_POSITIONS},
-    {"Markets", "PERPS \xC2\xB7 HYPERLIQUID \xC2\xB7 PACIFICA \xC2\xB7 LIGHTER", &PG_MARKETS},
+    {"Markets", "PERPS \xC2\xB7 BY VENUE", &PG_MARKETS},
     {"News", "TRADING NEWS \xC2\xB7 YOUR MARKETS", &PG_NEWS},
     {"Ask AI", "ABOUT YOUR BOOK \xC2\xB7 READ-ONLY", &PG_ASK},
     {"Accounts", "TRADE-ONLY KEYS \xC2\xB7 LINK \xC2\xB7 REVOKE", &PG_ACCOUNTS},
@@ -147,7 +148,8 @@ static void rooms_update(void)
             double ch = dw_change_pct(r->venue, r->coin);
             two_tone_set(s_room_sub[i], a, fmt_pct(ch), chg_color(ch));
         } else {
-            two_tone_set(s_room_sub[i], r->venue >= 0 ? r->venue_name : "Private \xC2\xB7 your crew", "", C_MUTE);
+            two_tone_set(s_room_sub[i], r->venue >= 0 ? r->venue_name
+                                        : strcmp(r->id, "world") ? "Private \xC2\xB7 your crew" : "Everyone \xC2\xB7 every market", "", C_MUTE);
         }
         lv_label_set_text(s_room_rows[i].val, fmt_num(r->listening, 0));
     }
@@ -185,6 +187,7 @@ static int s_tab;
 static lv_obj_t *s_room_px, *s_room_chg, *s_room_area, *s_room_feed, *s_room_chart, *s_room_big, *s_room_bigsub, *s_room_orders;
 static int s_feed_seen = -1;
 static uint32_t s_cnd_req;
+static int room_open_orders(void);
 
 void dw_open_room(const char *room_id)
 {
@@ -236,7 +239,7 @@ static void room_tab_build(void)
     lv_obj_clean(s_room_area);
     s_room_feed = s_room_chart = s_room_big = s_room_bigsub = s_room_orders = NULL;
     static const char *TABS[] = {"Chat", "Chart", "Orders"};
-    ui_tabs(s_room_area, TABS, 3, s_tab);
+    ui_tabs(s_room_area, TABS, s_room.venue >= 0 ? 3 : 1, s_tab);   /* no market: chat only */
     if (s_tab == 0) {
         s_room_feed = ui_col(s_room_area, 9);
         lv_obj_set_flex_grow(s_room_feed, 1);
@@ -308,13 +311,48 @@ static void room_update(void)
             dw_ord_t *o = &g_model.ord[i];
             if (o->venue != s_room.venue || strcmp(o->coin, s_room.coin)) continue;
             char t[48], s[64];
-            snprintf(t, sizeof t, "%s %s %s", o->buy ? "Buy" : "Sell", fmt_num(o->sz, 4), o->coin);
-            snprintf(s, sizeof s, "Limit %s \xC2\xB7 %s", fmt_px(o->px), dw_venue_name(o->venue));
-            ui_row(s_room_orders, t, s, fmt_num(o->px * o->sz, 2), "open", true);
+            bool trig = strcmp(o->kind, "LIMIT") && o->kind[0];
+            snprintf(t, sizeof t, "%s%s %s %s", trig ? o->kind : "", trig ? " \xC2\xB7" : "", o->buy ? "Buy" : "Sell", fmt_num(o->sz, 4));
+            snprintf(s, sizeof s, "%s %s \xC2\xB7 %s", trig ? "Trigger" : "Limit", fmt_px(o->px), dw_venue_name(o->venue));
+            ui_row_t rr = ui_row(s_room_orders, t, s, fmt_num(o->px * o->sz, 2), trig ? "waiting" : "open", true);
+            if (trig) lv_obj_set_style_text_color(rr.title, lv_color_hex(!strcmp(o->kind, "TP") ? C_NEON : C_BAD), 0);
             n++;
         }
         if (!n) ui_label(s_room_orders, &dw_sans_12, C_MUTE, "Nothing open in this market yet.");
+        char tr[24];
+        snprintf(tr, sizeof tr, "trade %s", s_room.coin);
+        dw_hint("page", "back", room_open_orders() ? "cancel all" : (s_room.venue >= 0 ? tr : NULL), false);
     }
+}
+
+static int room_open_orders(void)
+{
+    int n = 0;
+    for (int i = 0; i < g_model.nord; i++)
+        if (g_model.ord[i].venue == s_room.venue && !strcmp(g_model.ord[i].coin, s_room.coin)) n++;
+    return n;
+}
+
+static void on_cancelled(void *ctx, const dw_order_res_t *r)
+{
+    (void)ctx;
+    if (r->ok) dw_light_ok();
+    else { dw_light_fail(); dw_toast(r->msg, C_BAD); }
+}
+
+static void cancel_all(void)
+{
+    const dw_venue_t *v = dw_venue(s_room.venue);
+    int n = 0;
+    for (int i = 0; i < g_model.nord; i++) {
+        dw_ord_t *o = &g_model.ord[i];
+        if (o->venue != s_room.venue || strcmp(o->coin, s_room.coin) || !v->cancel) continue;
+        if (v->cancel(o->coin, o->oid, on_cancelled, NULL) == 0) n++;
+    }
+    dw_light_sending();
+    char t[64];
+    snprintf(t, sizeof t, "Cancelling %d order%s\xE2\x80\xA6", n, n == 1 ? "" : "s");
+    dw_toast(t, C_BLUE);
 }
 
 static void tab_click(lv_event_t *e)
@@ -355,12 +393,20 @@ static bool room_input(dw_input_t in)
     switch (in) {
     case DW_IN_WHEEL_UP:
     case DW_IN_WHEEL_DOWN:
+        if (s_room.venue < 0) return true;
         s_tab = (s_tab + (in == DW_IN_WHEEL_DOWN ? 1 : 2)) % 3;
         room_tab_build();
         room_update();
         return true;
     case DW_IN_TRADE:
-        if (s_room.venue >= 0) dw_open_ticket(s_room.venue, s_room.coin, true);
+        if (s_tab == 2 && room_open_orders()) {
+            char b[120];
+            snprintf(b, sizeof b, "%d open order%s on %s-PERP, %s. Positions stay open.", room_open_orders(),
+                     room_open_orders() == 1 ? "" : "s", s_room.coin, dw_venue_name(s_room.venue));
+            dw_confirm_open("Cancel orders?", b, "PRESS THE TRADE KEY TO CANCEL", cancel_all);
+        } else if (s_room.venue >= 0) {
+            dw_open_ticket(s_room.venue, s_room.coin, true);
+        }
         return true;
     case DW_IN_PTT_DOWN:
         if (s_tab != 0) { s_tab = 0; room_tab_build(); room_update(); }

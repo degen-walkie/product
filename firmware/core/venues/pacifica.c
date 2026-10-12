@@ -58,7 +58,7 @@ static int signed_post(const char *path, const char *type, const char *data_sort
              "{\"account\":\"%s\",\"agent_wallet\":\"%s\",\"signature\":\"%s\",\"timestamp\":%lld,\"expiry_window\":%d,%s}",
              g_model.acct[V_PAC].account, s_agent, sig58, ts, EXPIRY, fields);
     char url[160];
-    snprintf(url, sizeof url, DW_PAC_API "%s", path);
+    snprintf(url, sizeof url, "%s" "%s", dw_url(U_PAC), path);
     int rc = dw_http_json("POST", url, NULL, body, cb, ctx);
     free(body);
     return rc;
@@ -183,10 +183,14 @@ static void on_orders(void *ctx, int status, cJSON *root)
     cJSON_ArrayForEach(it, d) {
         if (n >= DW_MAX_ORD) break;
         dw_ord_t *x = &o[n++];
+        memset(x, 0, sizeof *x);
         x->venue = V_PAC;
         snprintf(x->coin, sizeof x->coin, "%s", dw_jstr(it, "symbol"));
         x->buy = !strcmp(dw_jstr(it, "side"), "bid");
-        x->px = dw_jnum(it, "price");
+        const char *ot = dw_jstr(it, "order_type");
+        bool stop = strstr(ot, "stop_loss") != NULL, take = strstr(ot, "take_profit") != NULL;
+        x->px = (stop || take) ? dw_jnum(it, "stop_price") : dw_jnum(it, "price");
+        snprintf(x->kind, sizeof x->kind, "%s", take ? "TP" : stop ? "SL" : "LIMIT");
         x->sz = dw_jnum(it, "initial_amount") - dw_jnum(it, "filled_amount");
         x->oid = (uint64_t)dw_jnum(it, "order_id");
     }
@@ -197,23 +201,23 @@ static void pac_poll(void)
 {
     if (!s_info_at || hal_millis() - s_info_at > 15000) {
         s_info_at = hal_millis();
-        dw_http_json("GET", DW_PAC_API "/info", NULL, NULL, on_info, NULL);
+        dw_http_json("GET", dw_urlf(U_PAC, "/info"), NULL, NULL, on_info, NULL);
     }
     dw_acct_t *a = &g_model.acct[V_PAC];
     if (!a->linked) return;
     char url[200];
-    snprintf(url, sizeof url, DW_PAC_API "/account?account=%s", a->account);
+    snprintf(url, sizeof url, "%s" "/account?account=%s", dw_url(U_PAC), a->account);
     dw_http_json("GET", url, NULL, NULL, on_account, NULL);
-    snprintf(url, sizeof url, DW_PAC_API "/positions?account=%s", a->account);
+    snprintf(url, sizeof url, "%s" "/positions?account=%s", dw_url(U_PAC), a->account);
     dw_http_json("GET", url, NULL, NULL, on_positions, NULL);
-    snprintf(url, sizeof url, DW_PAC_API "/orders?account=%s", a->account);
+    snprintf(url, sizeof url, "%s" "/orders?account=%s", dw_url(U_PAC), a->account);
     dw_http_json("GET", url, NULL, NULL, on_orders, NULL);
 }
 
 static void pac_start(void)
 {
     load_key();
-    if (s_ws < 0) s_ws = hal_ws_open(DW_PAC_WS, on_ws, on_ws_state, NULL);
+    if (s_ws < 0) s_ws = hal_ws_open(dw_url(U_PAC_WS), on_ws, on_ws_state, NULL);
     s_info_at = 0;
     pac_poll();
 }
@@ -321,6 +325,47 @@ static int pac_order(const dw_order_req_t *req, dw_order_cb cb, void *ctx)
     return 0;
 }
 
+/* ---------- TP / SL and cancel ---------- */
+
+static int pac_tpsl(const char *coin, bool long_pos, double sz, double tp, double sl, dw_order_cb cb, void *ctx)
+{
+    (void)sz;
+    dw_mkt_t *m = dw_mkt_find(V_PAC, coin);
+    if (!s_has_key || !g_model.acct[V_PAC].linked || !m || (tp <= 0 && sl <= 0)) return -1;
+    ord_ctx_t *c = calloc(1, sizeof *c);
+    if (!c) return -1;
+    c->cb = cb;
+    c->ctx = ctx;
+    snprintf(c->req.coin, sizeof c->req.coin, "%s", coin);
+    const char *side = long_pos ? "ask" : "bid";   /* the closing side */
+    char tps[32] = "", sls[32] = "", tpj[64] = "", slj[64] = "";
+    if (tp > 0) { dw_num_str(tp, m->px_dec, tps, sizeof tps); snprintf(tpj, sizeof tpj, "{\"stop_price\":\"%s\"}", tps); }
+    if (sl > 0) { dw_num_str(sl, m->px_dec, sls, sizeof sls); snprintf(slj, sizeof slj, "{\"stop_price\":\"%s\"}", sls); }
+    char data[320], fields[320];
+    /* sorted: side, stop_loss, symbol, take_profit */
+    snprintf(data, sizeof data, "{\"side\":\"%s\"%s%s,\"symbol\":\"%s\"%s%s}", side, sl > 0 ? ",\"stop_loss\":" : "", slj, coin,
+             tp > 0 ? ",\"take_profit\":" : "", tpj);
+    snprintf(fields, sizeof fields, "\"symbol\":\"%s\",\"side\":\"%s\"%s%s%s%s", coin, side, tp > 0 ? ",\"take_profit\":" : "", tpj,
+             sl > 0 ? ",\"stop_loss\":" : "", slj);
+    if (signed_post("/positions/tpsl", "set_position_tpsl", data, fields, on_order, c) < 0) { free(c); return -1; }
+    return 0;
+}
+
+static int pac_cancel(const char *coin, uint64_t oid, dw_order_cb cb, void *ctx)
+{
+    if (!s_has_key || !g_model.acct[V_PAC].linked) return -1;
+    ord_ctx_t *c = calloc(1, sizeof *c);
+    if (!c) return -1;
+    c->cb = cb;
+    c->ctx = ctx;
+    snprintf(c->req.coin, sizeof c->req.coin, "%s", coin);
+    char data[96], fields[96];
+    snprintf(data, sizeof data, "{\"order_id\":%llu,\"symbol\":\"%s\"}", (unsigned long long)oid, coin);
+    snprintf(fields, sizeof fields, "\"symbol\":\"%s\",\"order_id\":%llu", coin, (unsigned long long)oid);
+    if (signed_post("/orders/cancel", "cancel_order", data, fields, on_order, c) < 0) { free(c); return -1; }
+    return 0;
+}
+
 /* ---------- candles ---------- */
 
 typedef struct { dw_candles_cb cb; void *ctx; } cnd_ctx_t;
@@ -351,7 +396,7 @@ static int pac_candles(const char *coin, const char *interval, int count, dw_can
     c->ctx = ctx;
     uint64_t end = dw_now_ms(), start = end - (uint64_t)dw_interval_ms(interval) * (uint64_t)count;
     char url[200];
-    snprintf(url, sizeof url, DW_PAC_API "/kline?symbol=%s&interval=%s&start_time=%llu&end_time=%llu", coin, interval,
+    snprintf(url, sizeof url, "%s" "/kline?symbol=%s&interval=%s&start_time=%llu&end_time=%llu", dw_url(U_PAC), coin, interval,
              (unsigned long long)start, (unsigned long long)end);
     return dw_http_json("GET", url, NULL, NULL, on_candles, c);
 }
@@ -368,7 +413,7 @@ static int pac_link_begin(const char *session, char *qr, size_t cap)
     hal_store_set("pac.key", hex);
     hal_store_set("pac.acct", NULL);
     load_key();
-    snprintf(qr, cap, "https://degenwalkie.trade/link?v=pac&agent=%s&s=%s", s_agent, session);
+    snprintf(qr, cap, "%s?v=pac&agent=%s&s=%s&n=%s%s", dw_url(U_LINK), s_agent, session, dw_net_name(), dw_relay_param());
     return 0;
 }
 
@@ -397,6 +442,8 @@ const dw_venue_t dw_pac = {
     .poll = pac_poll,
     .order = pac_order,
     .candles = pac_candles,
+    .tpsl = pac_tpsl,
+    .cancel = pac_cancel,
     .link_begin = pac_link_begin,
     .link_done = pac_link_done,
     .unlink = pac_unlink,

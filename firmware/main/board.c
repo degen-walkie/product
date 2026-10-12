@@ -78,7 +78,7 @@ static void axp_init(void)
     wr(s_axp, AXP_ICC, 0x0A);   /* 400 mA for the 1000 mAh cell */
     /* Power key short press interrupt */
     int irq = rd(s_axp, AXP_IRQ_EN1);
-    if (irq >= 0) wr(s_axp, AXP_IRQ_EN1, (uint8_t)(irq | 0x08));
+    if (irq >= 0) wr(s_axp, AXP_IRQ_EN1, (uint8_t)(irq | 0x0C));   /* short + long press */
     wr(s_axp, AXP_IRQ_ST1, 0xFF);
     ESP_LOGI(TAG, "AXP2101 rails up, battery %d%%", axp_battery_percent());
 }
@@ -101,11 +101,13 @@ bool axp_vbus(void)
     return v >= 0 && (v & 0x20);
 }
 
-bool axp_power_key_pressed(void)
+int axp_power_key(void)
 {
     int v = rd(s_axp, AXP_IRQ_ST1);
     if (v > 0) wr(s_axp, AXP_IRQ_ST1, (uint8_t)v);
-    return v > 0 && (v & 0x08);
+    if (v > 0 && (v & 0x04)) return 2;   /* long press */
+    if (v > 0 && (v & 0x08)) return 1;   /* short press */
+    return 0;
 }
 
 /* ---------------- TCA9555 ---------------- */

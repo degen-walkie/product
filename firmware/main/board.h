@@ -55,4 +55,4 @@ void exp_write(uint16_t mask, bool high);
 int axp_battery_percent(void);
 bool axp_charging(void);
 bool axp_vbus(void);
-bool axp_power_key_pressed(void);   /* short press since last call */
+int axp_power_key(void);   /* 0 none, 1 short press, 2 long press, since last call */

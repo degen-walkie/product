@@ -159,12 +159,12 @@ static void lit_poll(void)
 {
     if (!s_books_at || hal_millis() - s_books_at > 15000) {
         s_books_at = hal_millis();
-        dw_http_json("GET", DW_LIT_API "/orderBooks", NULL, NULL, on_books, NULL);
+        dw_http_json("GET", dw_urlf(U_LIT, "/orderBooks"), NULL, NULL, on_books, NULL);
     }
-    dw_http_json("GET", DW_LIT_API "/orderBookDetails", NULL, NULL, on_details, NULL);
+    dw_http_json("GET", dw_urlf(U_LIT, "/orderBookDetails"), NULL, NULL, on_details, NULL);
     if (!g_model.acct[V_LIT].linked) return;
     char url[160];
-    snprintf(url, sizeof url, DW_LIT_API "/account?by=index&value=%ld", s_acct_idx);
+    snprintf(url, sizeof url, "%s" "/account?by=index&value=%ld", dw_url(U_LIT), s_acct_idx);
     dw_http_json("GET", url, NULL, NULL, on_account, NULL);
 }
 
@@ -226,7 +226,7 @@ static int send_tx(ord_ctx_t *c, int tx_type, const char *tx_body)
     char enc[1400], body[1500];
     urlenc(tx_info, enc, sizeof enc);
     snprintf(body, sizeof body, "tx_type=%d&tx_info=%s", tx_type, enc);
-    return dw_http_json("POST", DW_LIT_API "/sendTx", "Content-Type: application/x-www-form-urlencoded\n", body, on_sent, c);
+    return dw_http_json("POST", dw_urlf(U_LIT, "/sendTx"), "Content-Type: application/x-www-form-urlencoded\n", body, on_sent, c);
 }
 
 static void on_nonce(void *ctx, int status, cJSON *root)
@@ -265,7 +265,7 @@ static void on_nonce(void *ctx, int status, cJSON *root)
 static void next_step(ord_ctx_t *c)
 {
     char url[200];
-    snprintf(url, sizeof url, DW_LIT_API "/nextNonce?account_index=%ld&api_key_index=%d", s_acct_idx, s_key_idx);
+    snprintf(url, sizeof url, "%s" "/nextNonce?account_index=%ld&api_key_index=%d", dw_url(U_LIT), s_acct_idx, s_key_idx);
     if (dw_http_json("GET", url, NULL, NULL, on_nonce, c) < 0) finish(c, false, false, "Network error");
 }
 
@@ -315,7 +315,7 @@ static int lit_candles(const char *coin, const char *interval, int count, dw_can
     c->ctx = ctx;
     uint64_t end = dw_now_ms(), start = end - (uint64_t)dw_interval_ms(interval) * (uint64_t)count;
     char url[220];
-    snprintf(url, sizeof url, DW_LIT_API "/candlesticks?market_id=%d&resolution=%s&start_timestamp=%llu&end_timestamp=%llu&count_back=%d",
+    snprintf(url, sizeof url, "%s" "/candlesticks?market_id=%d&resolution=%s&start_timestamp=%llu&end_timestamp=%llu&count_back=%d", dw_url(U_LIT),
              m->index, interval, (unsigned long long)start, (unsigned long long)end, count);
     return dw_http_json("GET", url, NULL, NULL, on_candles, c);
 }
@@ -333,7 +333,7 @@ static int lit_link_begin(const char *session, char *qr, size_t cap)
     hal_store_set("lit.acct", NULL);
     load_key();
     dw_hex(s_pub, 32, pub, true);
-    snprintf(qr, cap, "https://degenwalkie.trade/link?v=lit&pubkey=%s&s=%s", pub, session);
+    snprintf(qr, cap, "%s?v=lit&pubkey=%s&s=%s&n=%s%s", dw_url(U_LINK), pub, session, dw_net_name(), dw_relay_param());
     return 0;
 }
 

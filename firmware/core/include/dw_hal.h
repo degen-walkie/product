@@ -25,6 +25,7 @@ typedef enum {
     DW_IN_POWER,        /* short press: screen off / on */
     DW_IN_PTT_DOWN,     /* hold-to-talk started (on-screen mic button or key combo) */
     DW_IN_PTT_UP,
+    DW_IN_POWER_HOLD,   /* power key held 2 s: boot when off, power-off sheet when on */
 } dw_input_t;
 
 /* Implemented by the core; the platform calls it from the UI thread. */
@@ -70,6 +71,9 @@ int hal_store_set(const char *key, const char *val);          /* val == NULL del
 void hal_voice_start(void);
 void hal_voice_stop(void);
 void dw_app_voice_result(const char *text);   /* implemented by the core; NULL = nothing heard */
+
+/* Name of the Wi-Fi network the device is on ("" when offline). */
+void hal_wifi_ssid(char *out, size_t cap);
 
 /* Text shown as a QR code on the device, exposed so the simulator's "phone" can scan it. */
 void hal_qr_shown(const char *payload);

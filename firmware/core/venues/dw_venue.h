@@ -5,24 +5,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "dw_config.h"
 #include "dw_model.h"
 
-#ifndef DW_HL_API
-#define DW_HL_API "https://api.hyperliquid.xyz"
-#define DW_HL_WS "wss://api.hyperliquid.xyz/ws"
-#endif
-#ifndef DW_PAC_API
-#define DW_PAC_API "https://api.pacifica.fi/api/v1"
-#define DW_PAC_WS "wss://ws.pacifica.fi/ws"
-#endif
-#ifndef DW_LIT_API
-#define DW_LIT_API "https://mainnet.zklighter.elliot.ai/api/v1"
-#define DW_LIT_WS "wss://mainnet.zklighter.elliot.ai/stream"
-#endif
-#ifndef DW_RELAY_API
-#define DW_RELAY_API "https://relay.degenwalkie.trade/v1"
-#define DW_RELAY_WS "wss://relay.degenwalkie.trade/v1/ws"
-#endif
 
 typedef struct {
     char coin[12];
@@ -50,6 +35,9 @@ typedef struct {
     void (*poll)(void);
     int (*order)(const dw_order_req_t *req, dw_order_cb cb, void *ctx);
     int (*candles)(const char *coin, const char *interval, int count, dw_candles_cb cb, void *ctx);
+    /* Take profit / stop loss on an open position (0 = none). NULL when the venue lacks it. */
+    int (*tpsl)(const char *coin, bool long_pos, double sz, double tp, double sl, dw_order_cb cb, void *ctx);
+    int (*cancel)(const char *coin, uint64_t oid, dw_order_cb cb, void *ctx);
     /* Linking: create a fresh device key and return what the QR shows. */
     int (*link_begin)(const char *session, char *qr, size_t cap);
     void (*link_done)(const char *account, const char *extra);

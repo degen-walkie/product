@@ -3,3 +3,4 @@ build-sim/
 managed_components/
 sdkconfig
 sdkconfig.old
+build_log.txt

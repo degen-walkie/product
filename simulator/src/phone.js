@@ -89,7 +89,7 @@ export async function approveQr(qr) {
 
 /* ---- the attack demo: take the device's own key and try to withdraw ---- */
 export async function tryWithdrawWithDeviceKey() {
-  const k = localStorage.getItem('dw.fw.hl.key');
+  const k = localStorage.getItem('dw.fw.demo.hl.key');
   if (!k) return { ok: false, text: 'The device has no Hyperliquid key yet. Link Hyperliquid first.' };
   const action = { type: 'withdraw3', signatureChainId: '0x66eee', hyperliquidChain: 'Mainnet', destination: '0x000000000000000000000000000000000000dEaD', amount: '1000', time: Date.now() };
   const signature = signDigest(unhex(k), userDigest(action));
@@ -99,16 +99,16 @@ export async function tryWithdrawWithDeviceKey() {
 
 /* ---- first run: a demo device with two venues already linked ---- */
 export async function provisionDemo() {
-  if (localStorage.getItem('dw.provisioned')) return false;
+  if (localStorage.getItem('dw.demo.provisioned')) return false;
   const hlKey = secp256k1.utils.randomPrivateKey();
   const pacSeed = randomBytes(32);
-  localStorage.setItem('dw.fw.hl.key', hex(hlKey));
-  localStorage.setItem('dw.fw.hl.acct', wallets.hl.address);
-  localStorage.setItem('dw.fw.pac.key', hex(pacSeed));
-  localStorage.setItem('dw.fw.pac.acct', wallets.pac.pubkey);
+  localStorage.setItem('dw.fw.demo.hl.key', hex(hlKey));
+  localStorage.setItem('dw.fw.demo.hl.acct', wallets.hl.address);
+  localStorage.setItem('dw.fw.demo.pac.key', hex(pacSeed));
+  localStorage.setItem('dw.fw.demo.pac.acct', wallets.pac.pubkey);
   await approveHyperliquid(addressOfPriv(hlKey), 'setup');
   await approvePacifica(b58encode(edPub(pacSeed)), 'setup');
-  localStorage.setItem('dw.provisioned', '1');
+  localStorage.setItem('dw.demo.provisioned', '1');
   return true;
 }
 

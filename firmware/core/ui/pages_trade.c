@@ -39,6 +39,18 @@ double dw_ticket_notional(void)
     return dw_ticket_size() * px;
 }
 
+double dw_ticket_tp(double entry)
+{
+    if (!g_ticket.tp_pct || g_ticket.reduce || entry <= 0) return 0;
+    return entry * (1 + (g_ticket.buy ? 1 : -1) * g_ticket.tp_pct / 100.0);
+}
+
+double dw_ticket_sl(double entry)
+{
+    if (!g_ticket.sl_pct || g_ticket.reduce || entry <= 0) return 0;
+    return entry * (1 - (g_ticket.buy ? 1 : -1) * g_ticket.sl_pct / 100.0);
+}
+
 double dw_ticket_liq(void)
 {
     if (g_ticket.reduce) return 0;
@@ -58,6 +70,7 @@ void dw_open_ticket(int venue, const char *coin, bool buy)
     g_ticket.label = NULL;
     g_ticket.limit = false;
     g_ticket.limit_px = 0;
+    g_ticket.tp_pct = g_ticket.sl_pct = 0;
     if (g_ticket.lev <= 0) g_ticket.lev = 5;
     if (!g_ticket.size_pct) g_ticket.size_pct = 25;
     dw_nav_push(&PG_TICKET);
@@ -221,12 +234,15 @@ const dw_page_t PG_CHART = {.name = "chart", .build = ch_build, .update = ch_upd
 
 /* ======================= Ticket ======================= */
 
-enum { F_SIDE, F_TYPE, F_LEV, F_SIZE, F_PRICE, F_REVIEW };
+enum { F_SIDE, F_TYPE, F_LEV, F_SIZE, F_PRICE, F_TP, F_SL, F_REVIEW };
 static const int LEV[] = {2, 3, 5, 10, 20};
 static const int PCT[] = {10, 25, 50, 100};
+static const int TPS[] = {0, 2, 5, 10};
+static const int SLS[] = {0, 2, 3, 5};
 static dw_focus_t s_tk_f;
 static int s_tk_field[8];
 static bool s_tk_edit;
+static lv_obj_t *s_tk_tp, *s_tk_sl, *s_tk_tpsl;
 static lv_obj_t *s_tk_title, *s_tk_side, *s_tk_type, *s_tk_lev, *s_tk_pct, *s_tk_pxrow, *s_tk_pxval, *s_tk_size, *s_tk_px,
     *s_tk_liq, *s_tk_freelbl, *s_tk_warn;
 
@@ -255,6 +271,8 @@ static void tk_refresh(void)
     ui_chips_set(s_tk_type, g_ticket.limit ? 1 : 0);
     ui_chips_set(s_tk_lev, idx_of(LEV, 5, g_ticket.lev));
     ui_chips_set(s_tk_pct, idx_of(PCT, 4, g_ticket.size_pct));
+    ui_chips_set(s_tk_tp, idx_of(TPS, 4, g_ticket.tp_pct));
+    ui_chips_set(s_tk_sl, idx_of(SLS, 4, g_ticket.sl_pct));
     if (g_ticket.limit) lv_obj_remove_flag(s_tk_pxrow, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(s_tk_pxrow, LV_OBJ_FLAG_HIDDEN);
     double mark = dw_price(g_ticket.venue, g_ticket.coin);
@@ -266,6 +284,10 @@ static void tk_refresh(void)
     lv_label_set_text(s_tk_px, g_ticket.limit ? fmt_px(g_ticket.limit_px) : fmt_px(mark));
     double liq = dw_ticket_liq();
     lv_label_set_text(s_tk_liq, liq > 0 ? fmt_px(liq) : "\xE2\x80\x94");
+    double entry = g_ticket.limit ? g_ticket.limit_px : mark, tp = dw_ticket_tp(entry), sl = dw_ticket_sl(entry);
+    char tps[48];
+    snprintf(tps, sizeof tps, "%s / %s", tp > 0 ? fmt_px(tp) : "off", sl > 0 ? fmt_px(sl) : "off");
+    lv_label_set_text(s_tk_tpsl, tps);
     snprintf(s, sizeof s, "SIZE \xC2\xB7 OF %s USDC FREE MARGIN", fmt_num(g_model.acct[g_ticket.venue].free, 0));
     lv_label_set_text(s_tk_freelbl, s);
     bool linked = g_model.acct[g_ticket.venue].linked;
@@ -286,6 +308,16 @@ static void tk_adjust(int d)
     case F_SIZE: {
         int i = idx_of(PCT, 4, g_ticket.size_pct) + d;
         g_ticket.size_pct = PCT[i < 0 ? 0 : i > 3 ? 3 : i];
+        break;
+    }
+    case F_TP: {
+        int i = idx_of(TPS, 4, g_ticket.tp_pct) + d;
+        g_ticket.tp_pct = TPS[i < 0 ? 0 : i > 3 ? 3 : i];
+        break;
+    }
+    case F_SL: {
+        int i = idx_of(SLS, 4, g_ticket.sl_pct) + d;
+        g_ticket.sl_pct = SLS[i < 0 ? 0 : i > 3 ? 3 : i];
         break;
     }
     case F_PRICE: {
@@ -321,6 +353,8 @@ static void chip_pick(lv_event_t *e)
     else if (box == s_tk_type) { g_ticket.limit = idx == 1; g_ticket.limit_px = 0; }
     else if (box == s_tk_lev && idx < 5) g_ticket.lev = LEV[idx];
     else if (box == s_tk_pct && idx < 4) g_ticket.size_pct = PCT[idx];
+    else if (box == s_tk_tp && idx < 4) g_ticket.tp_pct = TPS[idx];
+    else if (box == s_tk_sl && idx < 4) g_ticket.sl_pct = SLS[idx];
     else return;
     tk_refresh();
 }
@@ -378,11 +412,32 @@ static void tk_build(lv_obj_t *body)
     lv_obj_add_event_cb(s_tk_type, chip_pick, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_tk_lev, chip_pick, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_tk_pct, chip_pick, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *tpsl = ui_rowbox(body, 6);
+    lv_obj_set_flex_align(tpsl, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_t *tpc = ui_col(tpsl, 3), *slc = ui_col(tpsl, 3);
+    lv_obj_set_width(tpc, LV_PCT(49));
+    lv_obj_set_width(slc, LV_PCT(49));
+    ui_eyebrow(tpc, "TAKE PROFIT +");
+    ui_eyebrow(slc, "STOP LOSS -");
+    static const char *TPL[] = {"off", "2%", "5%", "10%"}, *SLL[] = {"off", "2%", "3%", "5%"};
+    s_tk_tp = ui_chips(tpc, TPL, 4, 0);
+    s_tk_sl = ui_chips(slc, SLL, 4, 0);
+    lv_obj_set_style_pad_column(s_tk_tp, 3, 0);
+    lv_obj_set_style_pad_column(s_tk_sl, 3, 0);
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_style_pad_hor(lv_obj_get_child(s_tk_tp, i), 5, 0);
+        lv_obj_set_style_pad_hor(lv_obj_get_child(s_tk_sl, i), 5, 0);
+    }
+    tk_add(s_tk_tp, F_TP);
+    tk_add(s_tk_sl, F_SL);
+    lv_obj_add_event_cb(s_tk_tp, chip_pick, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_tk_sl, chip_pick, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *kv = ui_kv(body);
     s_tk_size = ui_kv_add(kv, "Size", "", 0);
     s_tk_px = ui_kv_add(kv, "Price", "", 0);
     s_tk_liq = ui_kv_add(kv, "Liq. price (est.)", "", C_BAD);
+    s_tk_tpsl = ui_kv_add(kv, "TP / SL", "", C_SOFT);
     s_tk_warn = ui_card(body, K_WARN);
     lv_obj_t *w = ui_label(s_tk_warn, &dw_sans_12, C_WARN, "This venue isn't linked yet. The trade key opens linking.");
     lv_obj_set_width(w, LV_PCT(100));
@@ -441,11 +496,51 @@ static void sheet_finish(lv_timer_t *t)
     if (ok && dw_nav_top() == &PG_TICKET) dw_nav_pop();
 }
 
+static char s_fill_text[140];
+
+static void sheet_done(bool ok, const char *text, const char *status)
+{
+    s_sh_state = SH_DONE;
+    lv_label_set_text(lv_obj_get_child(s_sh_sign, 1), text);
+    lv_obj_set_style_bg_color(s_sh_sign, lv_color_hex(ok ? C_NEON : C_BAD), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(s_sh_sign, 1), lv_color_hex(ok ? C_NEON : C_BAD), 0);
+    lv_obj_set_style_bg_color(lv_obj_get_child(s_sh_sign, 0), lv_color_hex(ok ? C_NEON : C_BAD), 0);
+    lv_label_set_text(s_sh_status, status);
+    lv_timer_t *tm = lv_timer_create(sheet_finish, ok ? 2200 : 3400, (void *)(uintptr_t)ok);
+    lv_timer_set_repeat_count(tm, 1);
+}
+
+static void on_tpsl(void *ctx, const dw_order_res_t *r)
+{
+    if ((uint32_t)(uintptr_t)ctx != s_sh_token || !s_sheet) return;
+    char t[200];
+    snprintf(t, sizeof t, "%s \xC2\xB7 TP/SL %s", s_fill_text, r->ok ? "SET" : "FAILED");
+    sheet_done(true, t, r->ok ? "Position open. TP/SL orders wait on the venue." : r->msg);
+}
+
 static void on_result(void *ctx, const dw_order_res_t *r)
 {
     if ((uint32_t)(uintptr_t)ctx != s_sh_token || !s_sheet) return;
-    s_sh_state = SH_DONE;
     char t[140];
+    if (r->ok && !r->resting && !g_ticket.reduce) {
+        double avg = r->avg_px > 0 ? r->avg_px : dw_price(g_ticket.venue, g_ticket.coin);
+        double tp = dw_ticket_tp(avg), sl = dw_ticket_sl(avg);
+        const dw_venue_t *v = dw_venue(g_ticket.venue);
+        if ((tp > 0 || sl > 0) && v->tpsl) {
+            dw_light_ok();
+            hal_vibrate(60);
+            snprintf(s_fill_text, sizeof s_fill_text, "FILLED %s %s @ %s", fmt_num(r->filled_sz, 4), g_ticket.coin, fmt_px(avg));
+            upper(s_fill_text);
+            snprintf(t, sizeof t, "%s \xC2\xB7 SETTING TP/SL\xE2\x80\xA6", s_fill_text);
+            lv_label_set_text(lv_obj_get_child(s_sh_sign, 1), t);
+            double sz = r->filled_sz > 0 ? r->filled_sz : dw_ticket_size();
+            if (v->tpsl(g_ticket.coin, g_ticket.buy, sz, tp, sl, on_tpsl, (void *)(uintptr_t)s_sh_token) == 0) return;
+            dw_order_res_t f = {.ok = false};
+            snprintf(f.msg, sizeof f.msg, "Could not sign TP/SL");
+            on_tpsl((void *)(uintptr_t)s_sh_token, &f);
+            return;
+        }
+    }
     if (r->ok) {
         dw_light_ok();
         hal_vibrate(60);
@@ -456,13 +551,7 @@ static void on_result(void *ctx, const dw_order_res_t *r)
         dw_light_fail();
         snprintf(t, sizeof t, "REJECTED: %s", r->msg);
     }
-    lv_label_set_text(lv_obj_get_child(s_sh_sign, 1), t);
-    lv_obj_set_style_bg_color(s_sh_sign, lv_color_hex(r->ok ? C_NEON : C_BAD), 0);
-    lv_obj_set_style_text_color(lv_obj_get_child(s_sh_sign, 1), lv_color_hex(r->ok ? C_NEON : C_BAD), 0);
-    lv_obj_set_style_bg_color(lv_obj_get_child(s_sh_sign, 0), lv_color_hex(r->ok ? C_NEON : C_BAD), 0);
-    lv_label_set_text(s_sh_status, r->ok ? "Confirmed by the venue." : "Nothing was executed.");
-    lv_timer_t *tm = lv_timer_create(sheet_finish, r->ok ? 1800 : 3200, (void *)(uintptr_t)r->ok);
-    lv_timer_set_repeat_count(tm, 1);
+    sheet_done(r->ok, t, r->ok ? "Confirmed by the venue." : "Nothing was executed.");
 }
 
 static void sheet_sign(void)
@@ -540,6 +629,11 @@ void dw_sheet_open(void)
     ui_kv_add(kv, "Price", v, 0);
     double liq = dw_ticket_liq();
     if (liq > 0) ui_kv_add(kv, "Liq. price (est.)", fmt_px(liq), C_BAD);
+    double ep = g_ticket.limit ? g_ticket.limit_px : dw_price(g_ticket.venue, g_ticket.coin);
+    if (dw_ticket_tp(ep) > 0 || dw_ticket_sl(ep) > 0) {
+        snprintf(v, sizeof v, "%s / %s", dw_ticket_tp(ep) > 0 ? fmt_px(dw_ticket_tp(ep)) : "off", dw_ticket_sl(ep) > 0 ? fmt_px(dw_ticket_sl(ep)) : "off");
+        ui_kv_add(kv, "TP / SL", v, C_SOFT);
+    }
     const char *agent = g_model.acct[g_ticket.venue].agent;
     snprintf(v, sizeof v, "%s \xC2\xB7 trade-only", *agent ? fmt_short(agent, 6, 4) : "none");
     ui_kv_add(kv, "Signing key", v, C_MUTE);

@@ -71,6 +71,7 @@ int dw_focus_add(dw_focus_t *f, lv_obj_t *obj);
 void dw_focus_set(dw_focus_t *f, int i);
 void dw_focus_move(dw_focus_t *f, int d);
 void dw_style_focus(lv_obj_t *obj, bool on);
+void dw_style_focusable(lv_obj_t *obj);   /* give obj the focus look without adding it to a focus list */
 
 /* ---- widgets ---- */
 lv_obj_t *ui_col(lv_obj_t *parent, int gap);

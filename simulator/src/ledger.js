@@ -66,7 +66,7 @@ export function summary(venue, acct) {
     used += v.margin;
     ntl += v.value;
   }
-  for (const o of acct.orders) used += (o.sz * o.px) / (acct.lev[o.coin] || 5);
+  for (const o of acct.orders) if (!o.kind || o.kind === 'LIMIT') used += (o.sz * o.px) / (acct.lev[o.coin] || 5);
   const equity = acct.collateral + upnl;
   return { equity, used, ntl, free: Math.max(0, equity - used), upnl };
 }
@@ -108,9 +108,10 @@ export function fill(venue, acct, coin, buy, sz, px, reduceOnly = false) {
 }
 
 /* Rest a limit order; filled by matchResting() when the price crosses. */
-export function rest(acct, coin, buy, sz, px) {
+export function rest(acct, coin, buy, sz, px, kind = 'LIMIT') {
   const oid = db.oid++;
-  acct.orders.push({ oid, coin, buy, sz, px, t: Date.now() });
+  if (kind !== 'LIMIT') acct.orders = acct.orders.filter((o) => !(o.coin === coin && o.kind === kind));
+  acct.orders.push({ oid, coin, buy, sz, px, kind, t: Date.now() });
   save();
   return oid;
 }
@@ -118,11 +119,24 @@ export function rest(acct, coin, buy, sz, px) {
 export function matchResting() {
   for (const venue of ['hl', 'pac', 'lit']) {
     for (const acct of Object.values(db[venue].accounts)) {
+      const fired = new Set();
       acct.orders = acct.orders.filter((o) => {
         const m = mark(venue, o.coin);
-        if ((o.buy && m <= o.px) || (!o.buy && m >= o.px)) return !fill(venue, acct, o.coin, o.buy, o.sz, o.px).ok;
-        return true;
+        const kind = o.kind || 'LIMIT';
+        if (kind === 'LIMIT') {
+          if ((o.buy && m <= o.px) || (!o.buy && m >= o.px)) return !fill(venue, acct, o.coin, o.buy, o.sz, o.px).ok;
+          return true;
+        }
+        const pos = acct.positions[o.coin];
+        if (!pos || !pos.szi || fired.has(o.coin)) return false;   // position gone: the other leg is cancelled too
+        // A sell trigger guards a long; a buy trigger guards a short.
+        const hit = kind === 'TP' ? (o.buy ? m <= o.px : m >= o.px) : (o.buy ? m >= o.px : m <= o.px);
+        if (!hit) return true;
+        fill(venue, acct, o.coin, o.buy, Math.min(o.sz, Math.abs(pos.szi)), m, true);
+        fired.add(o.coin);
+        return false;
       });
+      if (fired.size) acct.orders = acct.orders.filter((o) => !(fired.has(o.coin) && (o.kind === 'TP' || o.kind === 'SL')));
     }
   }
 }

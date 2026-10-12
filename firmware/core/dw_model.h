@@ -37,6 +37,7 @@ typedef struct {
     bool buy;
     double px, sz;
     uint64_t oid;
+    char kind[8];       /* "LIMIT", "TP", "SL" */
 } dw_ord_t;
 
 typedef struct {

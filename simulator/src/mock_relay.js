@@ -12,6 +12,7 @@ const ROOMS = [
   { id: 'hype', name: 'HYPE', coin: 'HYPE', venue: 'hl', listening: 688 },
   { id: 'btc', name: 'BTC', coin: 'BTC', venue: 'lit', listening: 2341 },
   { id: 'eth', name: 'ETH', coin: 'ETH', venue: 'pac', listening: 1019 },
+  { id: 'world', name: 'WORLD', coin: '', venue: '', listening: 5132 },
   { id: '4471', name: '4471', coin: '', venue: '', listening: 6 },
 ];
 const PEOPLE = [['@kaito', 'JA → EN'], ['@mara', 'ES → EN'], ['@lin', 'ZH → EN'], ['@jun', 'KO → EN'], ['@theo', 'EN'], ['@ana', 'PT → EN'], ['@degen_dad', 'EN']];
@@ -27,6 +28,7 @@ const LINES = [
   'Rolling into #{c} after this candle.',
   'Who is still long from {lo}? Holding or trimming?',
 ];
+const WORLD = ['GM from Seoul. Who is trading CPI today?', 'BTC dominance creeping up again.', 'Anyone else on Pacifica? Fills are fast.', 'Rooms in Japanese are wild today.', 'Taking the weekend off the screen. Radio mode on.'];
 const PRIVATE = ['Dinner at 8? Bringing the charts.', 'Closed my ETH, finally green.', 'Who is on the SOL long with me?', 'Room is quiet today.'];
 const NEWS = [
   ['SOL', 'Funding flips negative on SOL-PERP across three venues'],
@@ -49,6 +51,7 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const fmtPx = (v) => v.toLocaleString('en-US', { maximumFractionDigits: v >= 1000 ? 1 : 2, minimumFractionDigits: v >= 1000 ? 1 : 2 });
 
 function line(room) {
+  if (room.id === 'world') return pick(WORLD);
   if (!room.coin) return pick(PRIVATE);
   const venue = room.venue || 'hl';
   const px = mk.mid(room.coin, venue);
@@ -73,7 +76,7 @@ export function startRelay() {
   }
   news = NEWS.slice(0, 6).map(([tag, text], i) => ({ tag, text, ts: Date.now() - [2, 9, 14, 31, 60, 95][i] * 60e3 }));
   const chatter = () => {
-    const r = pick(ROOMS.slice(0, 4));
+    const r = pick(ROOMS.slice(0, 5));
     const [who, lang] = pick(PEOPLE);
     post(r.id, who, lang, line(r));
     setTimeout(chatter, 3500 + Math.random() * 5000);

@@ -19,6 +19,7 @@ const TYPES = {
   '/orders/cancel': 'cancel_order',
   '/account/leverage': 'update_leverage',
   '/agent/bind': 'bind_agent_wallet',
+  '/positions/tpsl': 'set_position_tpsl',
 };
 const SIG_FIELDS = ['account', 'agent_wallet', 'signature', 'timestamp', 'expiry_window'];
 const ok = (data) => ({ status: 200, body: { success: true, data, error: null, code: null } });
@@ -88,7 +89,11 @@ register(BASE, {
         return ok({ balance: s(a.collateral, 6), fee_level: 0, account_equity: s(x.equity, 6), available_to_spend: s(x.free, 6), available_to_withdraw: s(x.free, 6), pending_balance: '0', total_margin_used: s(x.used, 6), positions_count: Object.keys(a.positions).length, orders_count: a.orders.length, stop_orders_count: 0, updated_at: Date.now() });
       }
       if (path === '/positions') return ok(positions(L.account('pac', q.account)));
-      if (path === '/orders') return ok(L.account('pac', q.account).orders.map((o) => ({ order_id: o.oid, symbol: o.coin, side: o.buy ? 'bid' : 'ask', price: s(o.px, 4), initial_amount: s(o.sz, 5), filled_amount: '0', cancelled_amount: '0', order_type: 'limit', reduce_only: false, created_at: o.t })));
+      if (path === '/orders') return ok(L.account('pac', q.account).orders.map((o) => {
+        const trig = o.kind === 'TP' || o.kind === 'SL';
+        return { order_id: o.oid, symbol: o.coin, side: o.buy ? 'bid' : 'ask', price: trig ? '0' : s(o.px, 4), initial_amount: s(o.sz, 5), filled_amount: '0', cancelled_amount: '0',
+          order_type: o.kind === 'TP' ? 'take_profit_market' : o.kind === 'SL' ? 'stop_loss_market' : 'limit', stop_price: trig ? s(o.px, 4) : null, reduce_only: trig, created_at: o.t };
+      }));
       if (path === '/kline') {
         const iv = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h': 14400e3, '1d': 86400e3 }[q.interval] || 900e3;
         return ok(mk.candles(q.symbol, iv, +q.start_time, +(q.end_time || Date.now()), 'pac').map((b) => ({ t: b.t, T: b.T, s: q.symbol, i: q.interval, o: s(b.o, 4), c: s(b.c, 4), h: s(b.h, 4), l: s(b.l, 4), v: '812.3', n: 140 })));
@@ -110,6 +115,15 @@ register(BASE, {
       a.lev[b.symbol] = +b.leverage;
       if (a.positions[b.symbol]) a.positions[b.symbol].lev = +b.leverage;
       L.save();
+      return ok(null);
+    }
+    if (path === '/positions/tpsl') {
+      const a = L.account('pac', b.account);
+      const pos = a.positions[b.symbol];
+      if (!pos) return bad('No open position for ' + b.symbol);
+      const closeBuy = b.side === 'bid';
+      if (b.take_profit) { L.rest(a, b.symbol, closeBuy, Math.abs(pos.szi), +b.take_profit.stop_price, 'TP'); note(`TP at ${b.take_profit.stop_price} for ${b.symbol}`); }
+      if (b.stop_loss) { L.rest(a, b.symbol, closeBuy, Math.abs(pos.szi), +b.stop_loss.stop_price, 'SL'); note(`SL at ${b.stop_loss.stop_price} for ${b.symbol}`); }
       return ok(null);
     }
     if (path === '/orders/cancel') {

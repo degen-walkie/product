@@ -4,6 +4,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -34,6 +35,7 @@ EM_JS(void, js_store_set, (const char *k, const char *v), {
 });
 EM_JS(void, js_voice, (int on), { Module.dwHost.voice(on); });
 EM_JS(void, js_qr, (const char *p), { Module.dwHost.qr(UTF8ToString(p)); });
+EM_JS(char *, js_ssid, (void), { return stringToNewUTF8(Module.dwHost.ssid ? Module.dwHost.ssid() : "Home-5G"); });
 
 void hal_led(dw_led_color_t c, dw_led_mode_t m) { js_led(c, m); }
 void hal_vibrate(uint32_t ms) { js_vibrate((int)ms); }
@@ -137,6 +139,13 @@ int hal_store_set(const char *key, const char *val)
 void hal_voice_start(void) { js_voice(1); }
 void hal_voice_stop(void) { js_voice(0); }
 void hal_qr_shown(const char *payload) { js_qr(payload); }
+
+void hal_wifi_ssid(char *out, size_t cap)
+{
+    char *s = js_ssid();
+    snprintf(out, cap, "%s", s ? s : "");
+    free(s);
+}
 
 EMSCRIPTEN_KEEPALIVE void dw_sim_voice(char *text)
 {

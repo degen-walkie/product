@@ -17,9 +17,10 @@ Website: **[degenwalkie.trade](https://degenwalkie.trade/)** · Try the firmware
 | [`website/`](website/) | The full source of [degenwalkie.trade](https://degenwalkie.trade/): Next.js site, three.js viewer of the enclosure, the on-device UI rendered in HTML, Stripe pre-order flow. | MIT |
 | [`hardware/`](hardware/) | Mainboard schematic, netlist and bill of materials; wheel daughterboard wiring; a render of the board. | CERN-OHL-S v2 |
 | [`firmware/`](firmware/) | Device firmware: C and LVGL on the ESP32-S3. UI, venue clients for Hyperliquid, Pacifica and Lighter, on-device signing, board drivers. The same source builds to WebAssembly for the simulator. | MIT |
-| [`simulator/`](simulator/) | The browser simulator at [degenwalkie.trade/sim](https://degenwalkie.trade/sim): the firmware running in WebAssembly against mock Hyperliquid, Pacifica, Lighter and relay servers that check signatures like the real ones. | MIT |
+| [`simulator/`](simulator/) | The browser simulator at [degenwalkie.trade/sim](https://degenwalkie.trade/sim): the firmware in WebAssembly. Demo mode plays scripted walkthroughs against mock venues; Real mode trades on the Hyperliquid and Pacifica testnets. | MIT |
+| [`docs/`](docs/) | [Trade for real with the simulator](docs/real-trading.md): faucets, linking your wallets, your first trade. | MIT |
 
-The PCB layout (copper, placement, Gerber files) is not published. The board render is an illustration; its copper traces are decorative.
+The PCB layout (copper, placement, Gerber files) is not published. The board render is an illustration; its copper traces are decorative. The relay service behind rooms, news and the AI is hosted and not published; it never holds keys, and the firmware README documents exactly what the device sends it.
 
 ## Why open
 
@@ -28,7 +29,7 @@ The device holds the trading keys you link to it. You should be able to read the
 ## Status
 
 - **Hardware:** rev 7 mainboard (4-layer, ESP32-S3) and wheel daughterboard are in fabrication and assembly. Enclosure prototypes are 3D printed.
-- **Firmware:** runs end to end in the simulator (rooms, charts, tickets, signing on all three venues, account linking). Not yet run on a device; the board layer is written against the rev 7 schematic and will be fixed during bring-up. See [`firmware/README.md`](firmware/README.md#not-done-yet) for what is not done.
+- **Firmware:** runs end to end in the simulator, and trades on the Hyperliquid and Pacifica testnets in Real mode (setup, linking, tickets with TP/SL, closing, rooms, the AI). Not yet run on a device; the board layer is written against the rev 7 schematic and will be fixed during bring-up. See [`firmware/README.md`](firmware/README.md#not-done-yet) for what is not done.
 - **Genesis Edition:** 1,000 units, $99, fully refundable pre-orders at [degenwalkie.trade](https://degenwalkie.trade/).
 
 ## Contact

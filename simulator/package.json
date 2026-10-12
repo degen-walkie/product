@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --format=esm --target=es2020 --minify --sourcemap --outfile=public/sim.js",
+    "build": "esbuild src/main.js --bundle --format=esm --target=es2020 --minify --sourcemap --outfile=public/sim.js && esbuild src/link.js --bundle --format=esm --target=es2020 --minify --outfile=public/link.js",
     "dev": "esbuild src/main.js --bundle --format=esm --target=es2020 --sourcemap --outfile=public/sim.js --watch --servedir=public"
   },
   "devDependencies": {

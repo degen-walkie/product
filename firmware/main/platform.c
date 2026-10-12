@@ -9,6 +9,7 @@
 #include "platform.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
 
@@ -63,6 +64,7 @@ void hal_power(hal_power_t *out)
 bool hal_net_up(void) { return s_net_up; }
 void hal_backlight(bool on) { board_backlight(on ? 80 : 0); }
 void hal_qr_shown(const char *payload) { (void)payload; }
+void hal_wifi_ssid(char *out, size_t cap) { snprintf(out, cap, "%s", s_net_up ? CONFIG_DW_WIFI_SSID : ""); }
 
 /* ---------------- status light and motor ----------------
  * Rev 7 has red and green on the expander; blue (AXP2101 CHGLED) is not fitted. */

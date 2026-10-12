@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "dw_config.h"
 #include "dw_crypto.h"
 #include "dw_pages.h"
 #include "dw_venue.h"
@@ -16,6 +17,7 @@ static struct { lv_obj_t *card, *badge, *big, *sub, *note; } s_ac[V_COUNT];
 
 static void ac_open(int i)
 {
+    if (i < V_COUNT && !dw_venue_enabled(i)) { dw_toast("Lighter is coming soon. It works in the demo.", C_MUTE); return; }
     if (i < V_COUNT) {
         if (g_model.acct[i].linked) dw_toast("Linked with a trade-only key. Revoke it below, or from your main wallet.", C_NEON);
         else dw_open_link(i);
@@ -38,6 +40,15 @@ static void ac_update(void)
     for (int v = 0; v < V_COUNT; v++) {
         dw_acct_t *a = &g_model.acct[v];
         lv_obj_t *bl = lv_obj_get_child(s_ac[v].badge, 0);
+        if (!dw_venue_enabled(v)) {
+            lv_label_set_text(bl, "SOON");
+            ui_big_set(s_ac[v].big, "â", C_DIM);
+            lv_label_set_text(s_ac[v].sub, dw_venue_chain(v));
+            lv_label_set_text(s_ac[v].note, "COMING SOON Â· TRY IT IN THE DEMO");
+            lv_obj_set_style_text_color(s_ac[v].note, lv_color_hex(C_DIM), 0);
+            lv_obj_set_style_opa(s_ac[v].card, 130, 0);
+            continue;
+        }
         if (a->linked) {
             lv_label_set_text(bl, a->approved ? "TRADE-ONLY" : "CHECKING\xE2\x80\xA6");
             ui_big_set(s_ac[v].big, a->error ? "\xE2\x80\x94" : fmt_num(a->equity, 2), C_INK);
@@ -98,7 +109,7 @@ const dw_page_t PG_ACCOUNTS = {.name = "accounts", .build = ac_build, .update = 
 /* ======================= Link ======================= */
 
 static char s_session[17];
-static char s_qr[200];
+static char s_qr[320];
 static lv_obj_t *s_lk_status, *s_lk_qr;
 static lv_timer_t *s_lk_timer;
 static int s_lk_state;   /* 0 waiting, 1 approved on relay, 2 confirmed by venue */

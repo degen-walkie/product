@@ -2,6 +2,8 @@
 #include "dw_model.h"
 #include "dw_ui.h"
 
+extern const dw_page_t PG_SETUP_LANG, PG_SETUP_WIFI, PG_SETUP_PIN, PG_SETUP_LINK, PG_SETUP_DONE, PG_UNLOCK;
+bool dw_pin_set(void);
 extern const dw_page_t PG_BOOT, PG_ROOMS, PG_ROOM, PG_MENU, PG_MARKETS, PG_CHART, PG_POSITIONS, PG_NEWS, PG_TICKET,
     PG_ASK, PG_VOICE, PG_ACCOUNTS, PG_LINK, PG_REVOKE, PG_DEVICE;
 
@@ -12,6 +14,7 @@ typedef struct {
     bool buy;
     int lev;
     int size_pct;       /* of free margin; ignored when size_base > 0 */
+    int tp_pct, sl_pct; /* take profit / stop loss distance from entry, % (0 = off) */
     double size_base;   /* explicit size in base units (close / half) */
     bool limit;
     double limit_px;
@@ -33,6 +36,9 @@ void dw_open_link(int venue);
 double dw_ticket_notional(void);
 double dw_ticket_size(void);
 double dw_ticket_liq(void);
+/* TP / SL trigger prices from an entry price (0 when off). */
+double dw_ticket_tp(double entry);
+double dw_ticket_sl(double entry);
 
 /* Confirmation sheet: the only place an order gets signed (trade key only). */
 void dw_sheet_open(void);
@@ -47,3 +53,16 @@ bool dw_voice_listening(void);
 bool dw_parse_order(const char *text, dw_ticket_t *t);
 
 void dw_ui_start_timers(void);
+
+/* Power, setup and overlays */
+void dw_app_power_off(void);
+bool dw_app_setup_done(void);
+void dw_app_gesture(lv_dir_t dir);
+bool dw_page_is_setup(const dw_page_t *p);
+void dw_qp_open(void);
+void dw_poweroff_open(void);
+bool dw_overlays_active(void);
+bool dw_overlays_input(dw_input_t in);
+void dw_overlays_close(void);
+/* A bottom sheet confirmed only by the trade key. */
+void dw_confirm_open(const char *title, const char *body, const char *sign, void (*on_yes)(void));

@@ -5,11 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dw_config.h"
 #include "dw_model.h"
+#include "dw_pages.h"
 
 #define NAV_MAX 10
 
-static lv_obj_t *s_bar_l, *s_bar_s, *s_bar_r, *s_page, *s_hint[3][2], *s_hint_box[3];
+static lv_obj_t *s_bar_l, *s_bar_s, *s_bar_r, *s_bar_mode, *s_page, *s_hint[3][2], *s_hint_box[3];
 static const dw_page_t *s_stack[NAV_MAX];
 static int s_depth;
 static lv_style_t s_focus, s_chip_on, s_tab_on;
@@ -92,6 +94,13 @@ lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, cons
     return l;
 }
 
+static void bar_click(lv_event_t *e) { (void)e; dw_qp_open(); }
+static void on_gesture(lv_event_t *e)
+{
+    (void)e;
+    dw_app_gesture(lv_indev_get_gesture_dir(lv_indev_active()));
+}
+
 void dw_ui_init(void)
 {
     lv_obj_t *scr = lv_screen_active();
@@ -136,6 +145,11 @@ void dw_ui_init(void)
     lv_obj_align_to(s_bar_s, s_bar_l, LV_ALIGN_OUT_RIGHT_MID, 6, 0);
     s_bar_r = ui_label(bar, &lv_font_montserrat_14, C_MUTE, "");
     lv_obj_align(s_bar_r, LV_ALIGN_RIGHT_MID, 0, 0);
+    s_bar_mode = ui_label(bar, &dw_monob_9, C_WARN, "");
+    /* Tap or pull down on the status bar: quick panel. Swipes anywhere: pages. */
+    lv_obj_add_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(bar, bar_click, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(scr, on_gesture, LV_EVENT_GESTURE, NULL);
 
     /* page area */
     s_page = box(scr);
@@ -187,6 +201,10 @@ static void bar_power_update(lv_timer_t *t)
     snprintf(buf, sizeof buf, "%s  %s %d", p.charging ? LV_SYMBOL_CHARGE : (hal_net_up() ? LV_SYMBOL_WIFI : ""), bat, p.percent);
     lv_label_set_text(s_bar_r, buf);
     lv_obj_set_style_text_color(s_bar_r, C(p.percent <= 10 && !p.charging ? C_BAD : C_MUTE), 0);
+    dw_net_t n = dw_net();
+    lv_label_set_text(s_bar_mode, n == DW_NET_DEMO ? "" : dw_net_name());
+    lv_obj_set_style_text_color(s_bar_mode, C(n == DW_NET_MAINNET ? C_BAD : C_WARN), 0);
+    lv_obj_align_to(s_bar_mode, s_bar_r, LV_ALIGN_OUT_LEFT_MID, -8, 0);
 }
 
 void dw_hint(const char *roll, const char *press, const char *trade, bool sign)
@@ -334,6 +352,8 @@ void dw_light_idle(void)
 }
 
 /* ---------------- focus ---------------- */
+
+void dw_style_focusable(lv_obj_t *obj) { lv_obj_add_style(obj, &s_focus, LV_STATE_USER_1); }
 
 void dw_style_focus(lv_obj_t *obj, bool on)
 {

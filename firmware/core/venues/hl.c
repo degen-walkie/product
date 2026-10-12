@@ -67,7 +67,7 @@ static bool sign_l1(const uint8_t *mp, size_t mplen, uint64_t nonce, char *sig_j
 
     uint8_t st[32 * 3];
     kstr("Agent(string source,bytes32 connectionId)", st);
-    kstr("a", st + 32);  /* "a" = mainnet, "b" = testnet */
+    kstr(dw_net() == DW_NET_TESTNET ? "b" : "a", st + 32);  /* "a" = mainnet, "b" = testnet */
     memcpy(st + 64, conn, 32);
     uint8_t struct_hash[32];
     dw_keccak256(st, sizeof st, struct_hash);
@@ -94,7 +94,7 @@ static bool sign_l1(const uint8_t *mp, size_t mplen, uint64_t nonce, char *sig_j
 
 static int info(const char *body, dw_json_cb cb, void *ctx)
 {
-    return dw_http_json("POST", DW_HL_API "/info", NULL, body, cb, ctx);
+    return dw_http_json("POST", dw_urlf(U_HL, "/info"), NULL, body, cb, ctx);
 }
 
 static int exchange(const char *action_json, const uint8_t *mp, size_t mplen, dw_json_cb cb, void *ctx)
@@ -107,7 +107,7 @@ static int exchange(const char *action_json, const uint8_t *mp, size_t mplen, dw
     if (!body) return -1;
     snprintf(body, n, "{\"action\":%s,\"nonce\":%llu,\"signature\":%s,\"vaultAddress\":null}", action_json,
              (unsigned long long)nonce, sig);
-    int rc = dw_http_json("POST", DW_HL_API "/exchange", NULL, body, cb, ctx);
+    int rc = dw_http_json("POST", dw_urlf(U_HL, "/exchange"), NULL, body, cb, ctx);
     free(body);
     return rc;
 }
@@ -211,12 +211,16 @@ static void on_orders(void *ctx, int status, cJSON *root)
     cJSON_ArrayForEach(it, root) {
         if (n >= DW_MAX_ORD) break;
         dw_ord_t *x = &o[n++];
+        memset(x, 0, sizeof *x);
         x->venue = V_HL;
         snprintf(x->coin, sizeof x->coin, "%s", dw_jstr(it, "coin"));
         x->buy = !strcmp(dw_jstr(it, "side"), "B");
-        x->px = dw_jnum(it, "limitPx");
         x->sz = dw_jnum(it, "sz");
         x->oid = (uint64_t)dw_jnum(it, "oid");
+        bool trig = cJSON_IsTrue(cJSON_GetObjectItem(it, "isTrigger"));
+        const char *ot = dw_jstr(it, "orderType");
+        x->px = trig ? dw_jnum(it, "triggerPx") : dw_jnum(it, "limitPx");
+        snprintf(x->kind, sizeof x->kind, "%s", !trig ? "LIMIT" : strstr(ot, "Take") ? "TP" : "SL");
     }
     dw_model_set_orders(V_HL, o, n);
 }
@@ -247,7 +251,7 @@ static void hl_poll(void)
     char body[160];
     snprintf(body, sizeof body, "{\"type\":\"clearinghouseState\",\"user\":\"%s\"}", a->account);
     info(body, on_state, NULL);
-    snprintf(body, sizeof body, "{\"type\":\"openOrders\",\"user\":\"%s\"}", a->account);
+    snprintf(body, sizeof body, "{\"type\":\"frontendOpenOrders\",\"user\":\"%s\"}", a->account);
     info(body, on_orders, NULL);
     snprintf(body, sizeof body, "{\"type\":\"extraAgents\",\"user\":\"%s\"}", a->account);
     info(body, on_agents, NULL);
@@ -256,7 +260,7 @@ static void hl_poll(void)
 static void hl_start(void)
 {
     load_key();
-    if (s_ws < 0) s_ws = hal_ws_open(DW_HL_WS, on_ws, on_ws_state, NULL);
+    if (s_ws < 0) s_ws = hal_ws_open(dw_url(U_HL_WS), on_ws, on_ws_state, NULL);
     s_meta_at = 0;
     hl_poll();
 }
@@ -365,6 +369,103 @@ static int hl_order(const dw_order_req_t *req, dw_order_cb cb, void *ctx)
     return 0;
 }
 
+/* ---------- TP / SL and cancel ---------- */
+
+/* A trigger order that closes the position at market once triggerPx trades. */
+static void trigger_order(dw_mp_t *mp, char *json, size_t cap, int asset, bool close_buy, const char *ps, const char *ss,
+                          const char *trig, const char *kind)
+{
+    dw_mp_map(mp, 6);
+    dw_mp_str(mp, "a"); dw_mp_uint(mp, (uint64_t)asset);
+    dw_mp_str(mp, "b"); dw_mp_bool(mp, close_buy);
+    dw_mp_str(mp, "p"); dw_mp_str(mp, ps);
+    dw_mp_str(mp, "s"); dw_mp_str(mp, ss);
+    dw_mp_str(mp, "r"); dw_mp_bool(mp, true);
+    dw_mp_str(mp, "t"); dw_mp_map(mp, 1);
+    dw_mp_str(mp, "trigger"); dw_mp_map(mp, 3);
+    dw_mp_str(mp, "isMarket"); dw_mp_bool(mp, true);
+    dw_mp_str(mp, "triggerPx"); dw_mp_str(mp, trig);
+    dw_mp_str(mp, "tpsl"); dw_mp_str(mp, kind);
+    snprintf(json, cap,
+             "{\"a\":%d,\"b\":%s,\"p\":\"%s\",\"s\":\"%s\",\"r\":true,\"t\":{\"trigger\":{\"isMarket\":true,\"triggerPx\":\"%s\",\"tpsl\":\"%s\"}}}",
+             asset, close_buy ? "true" : "false", ps, ss, trig, kind);
+}
+
+static void on_simple(void *ctx, int status, cJSON *root)
+{
+    ord_ctx_t *c = ctx;
+    if (status != 200 || !root) { finish(c, false, false, 0, 0, "Network error"); return; }
+    if (strcmp(dw_jstr(root, "status"), "ok")) { finish(c, false, false, 0, 0, dw_jstr(root, "response")); return; }
+    cJSON *sts = cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "response"), "data"), "statuses");
+    cJSON *it;
+    cJSON_ArrayForEach(it, sts) {
+        const char *e = dw_jstr(it, "error");
+        if (*e) { finish(c, false, false, 0, 0, e); return; }
+    }
+    finish(c, true, false, 0, 0, "Done");
+}
+
+static int hl_tpsl(const char *coin, bool long_pos, double sz, double tp, double sl, dw_order_cb cb, void *ctx)
+{
+    dw_mkt_t *m = dw_mkt_find(V_HL, coin);
+    if (!s_has_key || !g_model.acct[V_HL].linked || !m || (tp <= 0 && sl <= 0)) return -1;
+    ord_ctx_t *c = calloc(1, sizeof *c);
+    if (!c) return -1;
+    c->cb = cb;
+    c->ctx = ctx;
+    bool close_buy = !long_pos;
+    char ss[32];
+    dw_num_str(sz, m->sz_dec, ss, sizeof ss);
+    uint8_t buf[400];
+    dw_mp_t mp;
+    dw_mp_init(&mp, buf, sizeof buf);
+    int n = (tp > 0) + (sl > 0);
+    dw_mp_map(&mp, 3);
+    dw_mp_str(&mp, "type"); dw_mp_str(&mp, "order");
+    dw_mp_str(&mp, "orders"); dw_mp_array(&mp, (uint32_t)n);
+    char parts[2][300] = {"", ""};
+    int k = 0;
+    const double trig[2] = {tp, sl};
+    const char *kind[2] = {"tp", "sl"};
+    for (int i = 0; i < 2; i++) {
+        if (trig[i] <= 0) continue;
+        char ts[32], ps[32];
+        dw_px_str(trig[i], 5, 6 - m->sz_dec, ts, sizeof ts);
+        /* market trigger: p is the worst fill price we accept */
+        dw_px_str(trig[i] * (close_buy ? 1.1 : 0.9), 5, 6 - m->sz_dec, ps, sizeof ps);
+        trigger_order(&mp, parts[k++], sizeof parts[0], m->index, close_buy, ps, ss, ts, kind[i]);
+    }
+    dw_mp_str(&mp, "grouping"); dw_mp_str(&mp, "positionTpsl");
+    char json[700];
+    snprintf(json, sizeof json, "{\"type\":\"order\",\"orders\":[%s%s%s],\"grouping\":\"positionTpsl\"}", parts[0], k > 1 ? "," : "",
+             k > 1 ? parts[1] : "");
+    if (mp.overflow || exchange(json, mp.buf, mp.len, on_simple, c) < 0) { free(c); return -1; }
+    return 0;
+}
+
+static int hl_cancel(const char *coin, uint64_t oid, dw_order_cb cb, void *ctx)
+{
+    dw_mkt_t *m = dw_mkt_find(V_HL, coin);
+    if (!s_has_key || !m) return -1;
+    ord_ctx_t *c = calloc(1, sizeof *c);
+    if (!c) return -1;
+    c->cb = cb;
+    c->ctx = ctx;
+    uint8_t buf[96];
+    dw_mp_t mp;
+    dw_mp_init(&mp, buf, sizeof buf);
+    dw_mp_map(&mp, 2);
+    dw_mp_str(&mp, "type"); dw_mp_str(&mp, "cancel");
+    dw_mp_str(&mp, "cancels"); dw_mp_array(&mp, 1);
+    dw_mp_map(&mp, 2);
+    dw_mp_str(&mp, "a"); dw_mp_uint(&mp, (uint64_t)m->index);
+    dw_mp_str(&mp, "o"); dw_mp_uint(&mp, oid);
+    char json[128];
+    snprintf(json, sizeof json, "{\"type\":\"cancel\",\"cancels\":[{\"a\":%d,\"o\":%llu}]}", m->index, (unsigned long long)oid);
+    if (exchange(json, mp.buf, mp.len, on_simple, c) < 0) { free(c); return -1; }
+    return 0;
+}
+
 /* ---------- candles ---------- */
 
 typedef struct { dw_candles_cb cb; void *ctx; } cnd_ctx_t;
@@ -414,7 +515,7 @@ static int hl_link_begin(const char *session, char *qr, size_t cap)
     memset(k, 0, sizeof k);
     load_key();
     g_model.acct[V_HL].approved = false;
-    snprintf(qr, cap, "https://degenwalkie.trade/link?v=hl&agent=%s&name=walkie&s=%s", s_agent, session);
+    snprintf(qr, cap, "%s?v=hl&agent=%s&s=%s&n=%s%s", dw_url(U_LINK), s_agent, session, dw_net_name(), dw_relay_param());
     return 0;
 }
 
@@ -443,6 +544,8 @@ const dw_venue_t dw_hl = {
     .poll = hl_poll,
     .order = hl_order,
     .candles = hl_candles,
+    .tpsl = hl_tpsl,
+    .cancel = hl_cancel,
     .link_begin = hl_link_begin,
     .link_done = hl_link_done,
     .unlink = hl_unlink,
