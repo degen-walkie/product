@@ -6,6 +6,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "dw_config.h"
 #include "dw_pages.h"
 #include "dw_venue.h"
 #include "relay.h"
@@ -13,6 +14,9 @@
 dw_ticket_t g_ticket = {.venue = V_HL, .coin = "SOL", .buy = true, .lev = 5, .size_pct = 25};
 int g_chart_venue = V_HL;
 char g_chart_coin[12] = "SOL";
+/* The market a voice order defaults to (opened from its chart); empty = say the coin. */
+static int s_vo_venue = -1;
+static char s_vo_coin[12];
 
 static uint32_t chg_color(double v) { return v >= 0 ? C_NEON : C_BAD; }
 static void upper(char *s) { for (; *s; s++) *s = (char)toupper((unsigned char)*s); }
@@ -130,6 +134,7 @@ static void ch_load(void)
 static void ch_action(int i)
 {
     dw_pos_t *p = dw_pos_find(g_chart_venue, g_chart_coin);
+    if (i == 4) { dw_open_voice(g_chart_venue, g_chart_coin); return; }
     if (i == 0) { s_tf = (s_tf + 1) % 4; ch_load(); return; }
     if (!p) { dw_open_ticket(g_chart_venue, g_chart_coin, i == 1); return; }
     if (i == 1) { dw_open_ticket(g_chart_venue, g_chart_coin, p->szi > 0); return; }  /* ADD */
@@ -204,7 +209,7 @@ static void ch_build(lv_obj_t *body)
     ui_label(hdr, &dw_disp_24, C_INK, t);
     s_ch_px = ui_label(hdr, &dw_monob_18, C_NEON, "");
     s_ch_sub = ui_sub(body, "", 0);
-    s_ch_chart = ui_chart(body, 176);
+    s_ch_chart = ui_chart(body, 150);
     dw_focus_reset(&s_ch_f, ch_action);
     s_ch_tf = ui_chips(body, TF_LABEL, 4, s_tf);
     lv_obj_add_event_cb(s_ch_tf, ch_tf_click, LV_EVENT_CLICKED, NULL);
@@ -228,6 +233,9 @@ static void ch_build(lv_obj_t *body)
         lv_obj_set_flex_grow(s_ch_btn[i], 1);
         dw_focus_add(&s_ch_f, s_ch_btn[i]);
     }
+    lv_obj_t *say = ui_btn(body, "SAY AN ORDER", K_PLAIN);   /* no talk key on the device */
+    lv_obj_set_width(say, LV_PCT(100));
+    dw_focus_add(&s_ch_f, say);
     dw_focus_set(&s_ch_f, 1);
     ch_load();
 }
@@ -244,6 +252,10 @@ static bool ch_input(dw_input_t in)
         return true;
     }
     case DW_IN_TRADE: ch_action(s_ch_f.i); return true;
+    case DW_IN_PTT_DOWN:   /* the app opens the voice page next: default to this market */
+        s_vo_venue = g_chart_venue;
+        snprintf(s_vo_coin, sizeof s_vo_coin, "%s", g_chart_coin);
+        return false;
     default: return false;
     }
 }
@@ -598,6 +610,19 @@ static void sheet_sign(void)
     }
 }
 
+/* The sheet covers the hint bar, so touch needs its own way out: a tap outside the
+ * panel cancels (the panel itself swallows taps). Signing stays on the trade key. */
+static void sheet_cancel_async(void *arg)
+{
+    (void)arg;
+    if (s_sheet && s_sh_state != SH_SENDING) dw_sheet_input(DW_IN_WHEEL_PRESS);
+}
+
+static void sheet_scrim_click(lv_event_t *e)
+{
+    if (lv_event_get_target(e) == s_sheet) lv_async_call(sheet_cancel_async, NULL);
+}
+
 void dw_sheet_open(void)
 {
     sheet_close();
@@ -607,6 +632,7 @@ void dw_sheet_open(void)
     lv_obj_set_style_bg_color(s_sheet, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_sheet, 150, 0);
     lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_sheet, sheet_scrim_click, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *p = lv_obj_create(s_sheet);
     lv_obj_remove_style_all(p);
@@ -623,6 +649,7 @@ void dw_sheet_open(void)
     lv_obj_set_flex_flow(p, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(p, 8, 0);
     lv_obj_remove_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(p, LV_OBJ_FLAG_CLICKABLE);   /* a tap on the panel is not a cancel */
 
     ui_eyebrow(p, "CONFIRM \xC2\xB7 SIGNED ON THIS DEVICE");
     double sz = dw_ticket_size();
@@ -658,7 +685,7 @@ void dw_sheet_open(void)
     snprintf(v, sizeof v, "%s \xC2\xB7 trade-only", *agent ? fmt_short(agent, 6, 4) : "none");
     ui_kv_add(kv, "Signing key", v, C_MUTE);
     s_sh_sign = ui_sign(p, "PRESS THE TRADE KEY TO SIGN");
-    s_sh_status = ui_label(p, &dw_mono_9, C_DIM, "TOUCH CAN'T SIGN \xC2\xB7 PRESS THE WHEEL TO CANCEL");
+    s_sh_status = ui_label(p, &dw_mono_9, C_DIM, "TOUCH CAN'T SIGN \xC2\xB7 TAP OUTSIDE OR PRESS THE WHEEL TO CANCEL");
     lv_obj_set_style_text_align(s_sh_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(s_sh_status, LV_PCT(100));
     s_sh_state = SH_IDLE;
@@ -744,6 +771,16 @@ bool dw_parse_order(const char *text, dw_ticket_t *t)
             if (!strcmp(w, "hyperliquid")) venue = V_HL;
         } else if (!strcmp(w, "pacifica")) venue = V_PAC;
         else if (!strcmp(w, "lighter")) venue = V_LIT;
+        else if (!coin[0] && L >= 2 && L < sizeof coin && !strstr(" my me to the at on of and for in it is with position ", w)) {
+            char up[12];   /* any coin listed on a venue: "long doge", "short pump" */
+            for (size_t i = 0; i <= L; i++) up[i] = (char)toupper((unsigned char)w[i]);
+            for (int v = 0; v < V_COUNT && !coin[0]; v++)
+                if (dw_venue_enabled(v) && dw_mkt_find(v, up)) snprintf(coin, sizeof coin, "%s", up);
+        }
+    }
+    if (!coin[0] && s_vo_coin[0]) {   /* "long, five x, fifty" on a market's own page */
+        snprintf(coin, sizeof coin, "%s", s_vo_coin);
+        if (venue < 0) venue = s_vo_venue;
     }
     if (in_num && size == 0 && acc + cur >= 10) size = acc + cur;
     if (!coin[0] || (side < 0 && !close)) return false;
@@ -833,7 +870,10 @@ static void vo_build(lv_obj_t *body)
     dw_hint(NULL, "back", NULL, false);
     ui_eyebrow(body, "YOU SAID");
     lv_obj_t *c = ui_card(body, K_PLAIN);
-    s_vo_said = ui_label(c, &dw_sans_14, C_INK, "Hold the mic and say an order.");
+    char hello[120];
+    if (s_vo_coin[0]) snprintf(hello, sizeof hello, "Hold the mic and say an order for %s: \"long, five x, fifty USDC\".", s_vo_coin);
+    else snprintf(hello, sizeof hello, "Hold the mic and say an order: \"long SOL, five x, fifty USDC\".");
+    s_vo_said = ui_label(c, &dw_sans_14, C_INK, hello);
     lv_obj_set_width(s_vo_said, LV_PCT(100));
     lv_label_set_long_mode(s_vo_said, LV_LABEL_LONG_WRAP);
     ui_eyebrow(body, "TICKET");
@@ -866,7 +906,19 @@ static bool vo_input(dw_input_t in)
     }
 }
 
-static void vo_leave(void) { dw_voice_sink_set(NULL); }
+static void vo_leave(void)
+{
+    dw_voice_sink_set(NULL);
+    s_vo_coin[0] = 0;
+    s_vo_venue = -1;
+}
+
+void dw_open_voice(int venue, const char *coin)
+{
+    s_vo_venue = venue;
+    snprintf(s_vo_coin, sizeof s_vo_coin, "%s", coin ? coin : "");
+    dw_nav_push(&PG_VOICE);
+}
 
 const dw_page_t PG_VOICE = {.name = "voice", .build = vo_build, .input = vo_input, .leave = vo_leave};
 

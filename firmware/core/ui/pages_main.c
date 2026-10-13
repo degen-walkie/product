@@ -499,6 +499,8 @@ static void mk_update(void)
     }
 }
 
+static void mk_say(lv_event_t *e) { (void)e; dw_open_voice(-1, NULL); }
+
 static void mk_build(lv_obj_t *body)
 {
     dw_bar("MARKETS", "\xC2\xB7 PERPS", C_NEON);
@@ -507,6 +509,9 @@ static void mk_build(lv_obj_t *body)
     lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_OFF);
     ui_title(body, "Markets", false);
     ui_sub(body, "THREE VENUES \xC2\xB7 FUNDS STAY ON EACH", 0);
+    lv_obj_t *say = ui_btn(body, "SAY AN ORDER", K_PLAIN);   /* no talk key on the device */
+    lv_obj_set_width(say, LV_PCT(100));
+    lv_obj_add_event_cb(say, mk_say, LV_EVENT_CLICKED, NULL);
     s_mk_list = ui_col(body, 0);
     s_mk_n = -1;
 }

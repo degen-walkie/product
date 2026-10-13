@@ -52,6 +52,7 @@ bool dw_voice_listening(void);   /* from talk pressed until the text arrives */
 bool dw_voice_held(void);        /* talk is held right now */
 /* Parse a spoken order ("long sol five x five hundred usdc"). Returns false if it is not one. */
 bool dw_parse_order(const char *text, dw_ticket_t *t);
+void dw_open_voice(int venue, const char *coin);   /* the voice order page; coin (may be NULL) is the default market */
 
 void dw_ui_start_timers(void);
 
