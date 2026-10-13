@@ -170,6 +170,48 @@ static void on_ws_state(void *ctx, int open)
 
 /* ---------- account ---------- */
 
+/* Unified (and portfolio-margin) accounts keep their USDC in spot and use it as perp
+ * margin directly: the perp summary then reads zero. -1 = not asked yet. */
+static int s_unified = -1;
+static uint32_t s_abstr_at, s_state_at, s_agents_at;
+static double s_spot_total, s_spot_hold, s_spot_free, s_perp_upnl;
+
+static void apply_unified(void)
+{
+    dw_acct_t *a = &g_model.acct[V_HL];
+    if (s_unified != 1) return;
+    a->equity = s_spot_total + s_perp_upnl;
+    a->margin_used = s_spot_hold;
+    a->free = s_spot_free;
+    dw_model_touch();
+}
+
+static void on_abstraction(void *ctx, int status, cJSON *root)
+{
+    (void)ctx;
+    if (status != 200 || !cJSON_IsString(root)) return;
+    s_unified = !strcmp(root->valuestring, "unifiedAccount") || !strcmp(root->valuestring, "portfolioMargin");
+}
+
+static void on_spot(void *ctx, int status, cJSON *root)
+{
+    (void)ctx;
+    if (status != 200 || !root) return;
+    cJSON *b;
+    cJSON_ArrayForEach(b, cJSON_GetObjectItem(root, "balances")) {
+        if (strcmp(dw_jstr(b, "coin"), "USDC")) continue;
+        s_spot_total = dw_jnum(b, "total");
+        s_spot_hold = dw_jnum(b, "hold");
+    }
+    s_spot_free = s_spot_total - s_spot_hold;
+    cJSON *av;   /* [[token, "available"], ...]; USDC is token 0 */
+    cJSON_ArrayForEach(av, cJSON_GetObjectItem(root, "tokenToAvailableAfterMaintenance")) {
+        cJSON *t = cJSON_GetArrayItem(av, 0), *v = cJSON_GetArrayItem(av, 1);
+        if (cJSON_IsNumber(t) && t->valueint == 0 && cJSON_IsString(v)) s_spot_free = atof(v->valuestring);
+    }
+    apply_unified();
+}
+
 static void on_state(void *ctx, int status, cJSON *root)
 {
     (void)ctx;
@@ -180,6 +222,7 @@ static void on_state(void *ctx, int status, cJSON *root)
     a->equity = dw_jnum(ms, "accountValue");
     a->margin_used = dw_jnum(ms, "totalMarginUsed");
     a->free = dw_jnum(root, "withdrawable");
+    s_perp_upnl = 0;
     dw_pos_t p[DW_MAX_POS];
     int n = 0;
     cJSON *ap;
@@ -197,8 +240,10 @@ static void on_state(void *ctx, int status, cJSON *root)
         x->margin = dw_jnum(q, "marginUsed");
         x->value = dw_jnum(q, "positionValue");
         x->lev = dw_jnum(cJSON_GetObjectItem(q, "leverage"), "value");
+        s_perp_upnl += x->upnl;
     }
     dw_model_set_positions(V_HL, p, n);
+    apply_unified();
 }
 
 static void on_orders(void *ctx, int status, cJSON *root)
@@ -254,6 +299,8 @@ static void on_role(void *ctx, int status, cJSON *root)
     if (!*user || g_model.acct[V_HL].linked || !s_has_key) return;
     hal_store_set("hl.acct", user);
     load_key();
+    s_unified = -1;
+    s_state_at = s_agents_at = s_abstr_at = 0;
     dw_model_touch();
     hl_poll();
 }
@@ -274,12 +321,30 @@ static void hl_poll(void)
         }
         return;
     }
-    snprintf(body, sizeof body, "{\"type\":\"clearinghouseState\",\"user\":\"%s\"}", a->account);
-    info(body, on_state, NULL);
-    snprintf(body, sizeof body, "{\"type\":\"frontendOpenOrders\",\"user\":\"%s\"}", a->account);
-    info(body, on_orders, NULL);
-    snprintf(body, sizeof body, "{\"type\":\"extraAgents\",\"user\":\"%s\"}", a->account);
-    info(body, on_agents, NULL);
+    /* Account and orders every 5 s (and right after an order: s_state_at = 0); the
+     * agent approval once a minute; the account mode once. */
+    uint32_t now = hal_millis();
+    if (s_unified < 0 && (!s_abstr_at || now - s_abstr_at > 30000)) {
+        s_abstr_at = now;
+        snprintf(body, sizeof body, "{\"type\":\"userAbstraction\",\"user\":\"%s\"}", a->account);
+        info(body, on_abstraction, NULL);
+    }
+    if (!s_state_at || now - s_state_at > 5000) {
+        s_state_at = now;
+        snprintf(body, sizeof body, "{\"type\":\"clearinghouseState\",\"user\":\"%s\"}", a->account);
+        info(body, on_state, NULL);
+        snprintf(body, sizeof body, "{\"type\":\"frontendOpenOrders\",\"user\":\"%s\"}", a->account);
+        info(body, on_orders, NULL);
+        if (s_unified == 1) {
+            snprintf(body, sizeof body, "{\"type\":\"spotClearinghouseState\",\"user\":\"%s\"}", a->account);
+            info(body, on_spot, NULL);
+        }
+    }
+    if (!s_agents_at || now - s_agents_at > 60000) {
+        s_agents_at = now;
+        snprintf(body, sizeof body, "{\"type\":\"extraAgents\",\"user\":\"%s\"}", a->account);
+        info(body, on_agents, NULL);
+    }
 }
 
 static void hl_start(void)
@@ -304,6 +369,7 @@ static void finish(ord_ctx_t *c, bool ok, bool resting, double px, double sz, co
     snprintf(r.msg, sizeof r.msg, "%s", msg ? msg : "");
     c->cb(c->ctx, &r);
     free(c);
+    s_state_at = 0;
     hl_poll();
 }
 
@@ -555,6 +621,8 @@ static void hl_link_done(const char *account, const char *extra)
     (void)extra;
     hal_store_set("hl.acct", account);
     load_key();
+    s_unified = -1;
+    s_state_at = s_agents_at = s_abstr_at = 0;
     hl_poll();
 }
 

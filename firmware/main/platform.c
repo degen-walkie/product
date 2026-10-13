@@ -132,7 +132,11 @@ static void voice_none(void *arg) { dw_app_voice_result(NULL); }
 void hal_voice_start(void) { audio_start(); }
 void hal_voice_stop(void) { if (!audio_stop()) platform_post(voice_none, NULL); }
 
-/* ---------------- HTTP ---------------- */
+/* ---------------- HTTP ----------------
+ * One worker per host (Hyperliquid, Pacifica, the relay), each keeping its TLS
+ * connection open between requests. A fresh TLS handshake costs about two seconds
+ * on this chip, and with a single shared queue one busy venue starved the rest
+ * (the rooms list and candles never arrived). */
 
 typedef struct {
     char *method, *url, *headers, *body;
@@ -140,61 +144,129 @@ typedef struct {
     void *ctx;
     int status;
     char *resp;
-    size_t len;
+    size_t len, cap;
 } http_job_t;
 
-static QueueHandle_t s_http_q;
+#define HTTP_WORKERS 3
+typedef struct {
+    QueueHandle_t q;
+    char host[64];
+    esp_http_client_handle_t c;
+} http_worker_t;
+static http_worker_t s_hw[HTTP_WORKERS];
 
 static char *sdup(const char *s) { return s ? strdup(s) : NULL; }
+
+static void http_free(http_job_t *j)
+{
+    free(j->method); free(j->url); free(j->headers); free(j->body); free(j->resp);
+    free(j);
+}
 
 static void http_deliver(void *arg)
 {
     http_job_t *j = arg;
     j->cb(j->ctx, j->status, j->resp, j->len);
-    free(j->method); free(j->url); free(j->headers); free(j->body); free(j->resp);
-    free(j);
+    http_free(j);
 }
 
-static void http_run(http_job_t *j)
+static void url_host(const char *url, char *out, size_t cap)
 {
-    esp_http_client_config_t cfg = {.url = j->url, .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = 10000};
-    esp_http_client_handle_t c = esp_http_client_init(&cfg);
+    const char *p = strstr(url, "://");
+    p = p ? p + 3 : url;
+    snprintf(out, cap, "%.*s", (int)strcspn(p, "/?#"), p);
+}
+
+static esp_err_t http_event(esp_http_client_event_t *e)
+{
+    http_job_t *j = e->user_data;
+    if (e->event_id != HTTP_EVENT_ON_DATA || !j || e->data_len <= 0) return ESP_OK;
+    if (j->len + (size_t)e->data_len + 1 > j->cap) {
+        size_t cap = j->cap ? j->cap : 4096;
+        while (cap < j->len + (size_t)e->data_len + 1) cap *= 2;
+        char *r = realloc(j->resp, cap);
+        if (!r) return ESP_FAIL;
+        j->resp = r;
+        j->cap = cap;
+    }
+    memcpy(j->resp + j->len, e->data, (size_t)e->data_len);
+    j->len += (size_t)e->data_len;
+    j->resp[j->len] = 0;
+    return ESP_OK;
+}
+
+static esp_err_t http_try(http_worker_t *w, http_job_t *j, char **names, char **vals, int nh)
+{
+    if (!w->c) {
+        esp_http_client_config_t cfg = {.url = j->url, .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = 10000,
+                                        .keep_alive_enable = true, .event_handler = http_event, .buffer_size = 2048};
+        w->c = esp_http_client_init(&cfg);
+        if (!w->c) return ESP_FAIL;
+    } else if (esp_http_client_set_url(w->c, j->url) != ESP_OK) {
+        return ESP_FAIL;
+    }
+    esp_http_client_handle_t c = w->c;
+    esp_http_client_set_user_data(c, j);
     esp_http_client_set_method(c, !strcmp(j->method, "POST") ? HTTP_METHOD_POST : HTTP_METHOD_GET);
-    for (char *line = j->headers, *nl; line && *line; line = nl ? nl + 1 : NULL) {
+    for (int i = 0; i < nh; i++) esp_http_client_set_header(c, names[i], vals[i]);
+    esp_http_client_set_post_field(c, j->body, j->body ? (int)strlen(j->body) : 0);
+    j->len = 0;
+    esp_err_t err = esp_http_client_perform(c);
+    j->status = err == ESP_OK ? esp_http_client_get_status_code(c) : -1;
+    for (int i = 0; i < nh; i++) esp_http_client_delete_header(c, names[i]);
+    return err;
+}
+
+static void http_run(http_worker_t *w, http_job_t *j)
+{
+    char host[64];
+    url_host(j->url, host, sizeof host);
+    if (w->c && strcmp(host, w->host)) { esp_http_client_cleanup(w->c); w->c = NULL; }
+    snprintf(w->host, sizeof w->host, "%s", host);
+
+    char *names[8], *vals[8];
+    int nh = 0;
+    for (char *line = j->headers, *nl; line && *line && nh < 8; line = nl ? nl + 1 : NULL) {
         nl = strchr(line, '\n');
         if (nl) *nl = 0;
         char *colon = strchr(line, ':');
         if (colon) {
             *colon = 0;
-            esp_http_client_set_header(c, line, colon + 1 + (colon[1] == ' '));
+            names[nh] = line;
+            vals[nh++] = colon + 1 + (colon[1] == ' ');
         }
         if (!nl) break;
     }
-    int blen = j->body ? (int)strlen(j->body) : 0;
-    j->status = -1;
-    if (esp_http_client_open(c, blen) == ESP_OK) {
-        if (blen) esp_http_client_write(c, j->body, blen);
-        esp_http_client_fetch_headers(c);
-        j->status = esp_http_client_get_status_code(c);
-        size_t cap = 4096;
-        j->resp = malloc(cap);
-        int r;
-        while (j->resp && (r = esp_http_client_read(c, j->resp + j->len, (int)(cap - j->len - 1))) > 0) {
-            j->len += (size_t)r;
-            if (cap - j->len < 1024) { cap *= 2; j->resp = realloc(j->resp, cap); }
-        }
-        if (j->resp) j->resp[j->len] = 0;
+    /* A kept-alive connection the server has since dropped fails once: reconnect and retry. */
+    if (http_try(w, j, names, vals, nh) != ESP_OK) {
+        if (w->c) { esp_http_client_cleanup(w->c); w->c = NULL; }
+        if (http_try(w, j, names, vals, nh) != ESP_OK && w->c) { esp_http_client_cleanup(w->c); w->c = NULL; }
     }
-    esp_http_client_cleanup(c);
     platform_post(http_deliver, j);
 }
 
 static void http_task(void *arg)
 {
+    http_worker_t *w = arg;
     for (;;) {
         http_job_t *j;
-        if (xQueueReceive(s_http_q, &j, portMAX_DELAY) == pdTRUE) http_run(j);
+        if (xQueueReceive(w->q, &j, portMAX_DELAY) == pdTRUE) http_run(w, j);
     }
+}
+
+/* Called on the UI thread only. A host keeps its worker once it has one. */
+static char s_route[HTTP_WORKERS][64];
+
+static http_worker_t *http_route(const char *url)
+{
+    char host[64];
+    url_host(url, host, sizeof host);
+    for (int i = 0; i < HTTP_WORKERS; i++) if (!strcmp(s_route[i], host)) return &s_hw[i];
+    for (int i = 0; i < HTTP_WORKERS; i++)
+        if (!s_route[i][0]) { snprintf(s_route[i], sizeof s_route[i], "%s", host); return &s_hw[i]; }
+    unsigned h = 0;
+    for (const char *p = host; *p; p++) h = h * 31 + (unsigned char)*p;
+    return &s_hw[h % HTTP_WORKERS];
 }
 
 int hal_http(const char *method, const char *url, const char *headers, const char *body, hal_http_cb cb, void *ctx)
@@ -207,8 +279,8 @@ int hal_http(const char *method, const char *url, const char *headers, const cha
     j->body = sdup(body);
     j->cb = cb;
     j->ctx = ctx;
-    if (xQueueSend(s_http_q, &j, 0) != pdTRUE) {
-        free(j->method); free(j->url); free(j->headers); free(j->body); free(j);
+    if (xQueueSend(http_route(url)->q, &j, 0) != pdTRUE) {
+        http_free(j);
         return -1;
     }
     return 0;
@@ -431,7 +503,9 @@ void platform_init(void)
     esp_timer_create(&a, &s_led_t);
     esp_timer_create_args_t v = {.callback = vibe_off, .name = "vibe"};
     esp_timer_create(&v, &s_vibe_t);
-    s_http_q = xQueueCreate(16, sizeof(http_job_t *));
-    xTaskCreatePinnedToCore(http_task, "http", 8 * 1024, NULL, 4, NULL, 0);
+    for (int i = 0; i < HTTP_WORKERS; i++) {
+        s_hw[i].q = xQueueCreate(12, sizeof(http_job_t *));
+        xTaskCreatePinnedToCore(http_task, "http", 8 * 1024, &s_hw[i], 4, NULL, 0);
+    }
     wifi_init();
 }

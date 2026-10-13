@@ -110,7 +110,7 @@ npx serve public            # or any static server
 
 - Lighter's real transaction signer (see above); Lighter is locked outside the demo until then.
 - Wi-Fi setup by scanning a QR with the rear camera. Development builds take Wi-Fi from menuconfig.
-- HTTP keep-alive per venue, OTA updates, the camera. With the CJK font the image is 2.4 MB; OTA needs two app slots, so it needs the 8 MB flash module or a smaller font.
+- OTA updates, the camera. With the CJK font the image is 2.4 MB; OTA needs two app slots, so it needs the 8 MB flash module or a smaller font.
 - The blue channel of the status light is not fitted on rev 7, so blue shows as green + red.
 
 ## Licences
