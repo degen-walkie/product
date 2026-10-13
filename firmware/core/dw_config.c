@@ -7,8 +7,10 @@
 #include "dw_hal.h"
 #include "dw_model.h"
 
-static dw_net_t s_net = DW_NET_DEMO;
-static char s_relay[128] = "https://relay.degenwalkie.trade/v1";
+#define DEFAULT_RELAY "https://relay-demo.degenwalkie.trade/v1"
+
+static dw_net_t s_net = DW_NET_MAINNET;
+static char s_relay[128] = DEFAULT_RELAY;
 static char s_relay_ws[140];
 static char s_link[128] = "https://degenwalkie.trade/link";
 
@@ -25,10 +27,10 @@ static const char *URLS[3][6] = {
 void dw_config_load(void)
 {
     char buf[128];
-    s_net = DW_NET_DEMO;
+    s_net = DW_NET_MAINNET;   /* a device with nothing stored trades on mainnet */
     if (hal_store_get("net.mode", buf, sizeof buf) > 0) {
         if (!strcmp(buf, "testnet")) s_net = DW_NET_TESTNET;
-        else if (!strcmp(buf, "mainnet")) s_net = DW_NET_MAINNET;
+        else if (!strcmp(buf, "demo")) s_net = DW_NET_DEMO;
     }
     if (hal_store_get("relay.url", buf, sizeof buf) > 0) snprintf(s_relay, sizeof s_relay, "%s", buf);
     if (hal_store_get("link.url", buf, sizeof buf) > 0) snprintf(s_link, sizeof s_link, "%s", buf);
@@ -73,7 +75,7 @@ const char *dw_relay_param(void)
 {
     static char out[200];
     static const char H[] = "0123456789ABCDEF";
-    if (!strcmp(s_relay, "https://relay.degenwalkie.trade/v1")) return "";
+    if (!strcmp(s_relay, DEFAULT_RELAY)) return "";
     size_t o = (size_t)snprintf(out, sizeof out, "&r=");
     for (const char *p = s_relay; *p && o + 4 < sizeof out; p++) {
         unsigned char c = (unsigned char)*p;

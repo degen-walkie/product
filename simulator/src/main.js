@@ -7,7 +7,7 @@ import { onLog, setReal } from './net.js';
 import './mock_hyperliquid.js';
 import './mock_pacifica.js';
 import './mock_lighter.js';
-import { startRelay } from './mock_relay.js';
+import { startRelay, BASE as MOCK_RELAY } from './mock_relay.js';
 import { approveQr, provisionDemo, tryWithdrawWithDeviceKey } from './phone.js';
 import { createHost, IN, storeKey } from './host.js';
 import { createPlayer, DEMOS } from './demo.js';
@@ -161,7 +161,7 @@ function demoWipe() {
 const playDemoDef = PLAY && DEMOS.find((d) => d.id === PLAY);
 const host = createHost(ui, {
   ns: NET,
-  relayUrl: MODE === 'real' ? RELAY : null,
+  relayUrl: MODE === 'real' ? RELAY : MOCK_RELAY,   // the demo's relay is the in-page mock
   linkUrl: MODE === 'real' ? LINK_URL : null,
   bootOff: MODE === 'real' || !!(playDemoDef && playDemoDef.off),
 });

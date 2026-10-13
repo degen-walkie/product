@@ -2,7 +2,7 @@
  *   demo     mainnet hostnames; the simulator answers them with in-page mocks
  *   testnet  Hyperliquid and Pacifica testnets (Lighter locked)
  *   mainnet  real money (Lighter locked)
- * The mode lives in storage ("net.mode"); the relay base URL in "relay.url". */
+ * The mode lives in storage ("net.mode", default mainnet); the relay base URL in "relay.url". */
 #pragma once
 #include <stdbool.h>
 
