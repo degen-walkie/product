@@ -30,8 +30,35 @@ export async function connectEvm() {
   return { address, chainId };
 }
 
+// Hyperliquid accepts a signature made on any EVM chain, but its own app signs on
+// Arbitrum, and a wallet sitting on, say, BNB Chain is confusing. Ask to switch first
+// (adding the chain if the wallet lacks it); if the user declines, sign where they are.
+const ARBITRUM = {
+  MAINNET: { chainId: '0xa4b1', chainName: 'Arbitrum One', rpcUrls: ['https://arb1.arbitrum.io/rpc'], blockExplorerUrls: ['https://arbiscan.io'] },
+  TESTNET: { chainId: '0x66eee', chainName: 'Arbitrum Sepolia', rpcUrls: ['https://sepolia-rollup.arbitrum.io/rpc'], blockExplorerUrls: ['https://sepolia.arbiscan.io'] },
+};
+
+async function toArbitrum(eth, net, log) {
+  const want = ARBITRUM[net === 'MAINNET' ? 'MAINNET' : 'TESTNET'];
+  if ((await eth.request({ method: 'eth_chainId' })).toLowerCase() === want.chainId) return;
+  log(`Switching your wallet to ${want.chainName} to sign…`);
+  try {
+    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: want.chainId }] });
+  } catch (e) {
+    if (e.code === 4902 || /unrecognized|not added|unknown chain/i.test(e.message || '')) {
+      try {
+        await eth.request({ method: 'wallet_addEthereumChain', params: [{ ...want, nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } }] });
+      } catch { log(`Couldn't add ${want.chainName}; signing on your current network instead.`); }
+    } else {
+      log(`Staying on your current network (${e.code === 4001 ? 'switch declined' : 'switch not supported'}). That works too.`);
+    }
+  }
+}
+
 export async function approveHyperliquid(agentAddress, net, log = () => {}) {
   const eth = evmProvider();
+  await connectEvm();
+  await toArbitrum(eth, net, log);
   const { address, chainId } = await connectEvm();
   const nonce = Date.now();
   const hyperliquidChain = net === 'MAINNET' ? 'Mainnet' : 'Testnet';
