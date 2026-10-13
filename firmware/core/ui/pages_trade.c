@@ -838,7 +838,7 @@ static void vo_show(const char *said)
     double liq = dw_ticket_liq();
     if (liq > 0) ui_kv_add(s_vo_kv, "Liq. price", fmt_px(liq), C_BAD);
     lv_obj_remove_flag(s_vo_sign, LV_OBJ_FLAG_HIDDEN);
-    dw_hint(NULL, "cancel", "review", true);
+    dw_hint(NULL, "cancel", "review", false);   /* review opens the sheet; only signing needs the key */
 }
 
 static void vo_result(const char *text)
@@ -864,6 +864,12 @@ static void vo_result(const char *text)
     vo_show(q);
 }
 
+static void vo_review_click(lv_event_t *e)
+{
+    (void)e;
+    if (s_vo_ok) dw_sheet_open();
+}
+
 static void vo_build(lv_obj_t *body)
 {
     dw_bar("VOICE", "\xC2\xB7 SHORTCUT", C_NEON);
@@ -881,7 +887,9 @@ static void vo_build(lv_obj_t *body)
     lv_obj_set_style_border_width(s_vo_kv, 1, 0);
     lv_obj_set_style_border_color(s_vo_kv, lv_color_hex(C_LINE2), 0);
     lv_obj_set_style_pad_all(s_vo_kv, 8, 0);
-    s_vo_sign = ui_sign(body, "PRESS THE TRADE KEY TO REVIEW");
+    s_vo_sign = ui_sign(body, "TAP OR PRESS THE TRADE KEY TO REVIEW");
+    lv_obj_add_flag(s_vo_sign, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_vo_sign, vo_review_click, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(s_vo_sign, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *sp = lv_obj_create(body);
     lv_obj_remove_style_all(sp);
