@@ -52,6 +52,9 @@ void hal_power(hal_power_t *out);
  * headers: "Name: value\n" lines, may be NULL. body may be NULL. */
 typedef void (*hal_http_cb)(void *ctx, int status, const char *body, size_t len);
 int hal_http(const char *method, const char *url, const char *headers, const char *body, hal_http_cb cb, void *ctx);
+/* A header line the platform consumes (never sent): someone is waiting on this request
+ * (candles, an order), so run it ahead of background polling. */
+#define HAL_HTTP_FAST "X-DW-Lane: fast"
 
 /* WebSocket: on_msg gets every text frame; on_state gets 1 when open, 0 when closed. */
 typedef void (*hal_ws_msg_cb)(void *ctx, const char *msg, size_t len);

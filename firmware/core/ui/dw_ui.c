@@ -649,7 +649,10 @@ lv_obj_t *ui_tabs(lv_obj_t *parent, const char *const *items, int n, int on)
         lv_obj_add_style(l, &s_tab_on, LV_STATE_CHECKED);
         if (i == on) lv_obj_add_state(l, LV_STATE_CHECKED);
         lv_obj_add_flag(l, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(l, LV_OBJ_FLAG_EVENT_BUBBLE);   /* the page listens on its body */
+        lv_obj_set_ext_click_area(l, 12);              /* 11 px text is a small target */
     }
+    lv_obj_add_flag(o, LV_OBJ_FLAG_EVENT_BUBBLE);
     char pg[16];
     snprintf(pg, sizeof pg, "%d / %d", on + 1, n);
     lv_obj_t *p = ui_label(o, &dw_mono_9, C_DIM, pg);

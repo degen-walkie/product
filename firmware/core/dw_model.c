@@ -1,6 +1,7 @@
 #include "dw_model.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "dw_hal.h"
@@ -89,7 +90,11 @@ int dw_http_json(const char *method, const char *url, const char *headers, const
     if (!r) return -1;
     r->cb = cb;
     r->ctx = ctx;
-    if (!headers && body) headers = "Content-Type: application/json\n";
+    char h[160];
+    if (body && (!headers || !strstr(headers, "Content-Type"))) {
+        snprintf(h, sizeof h, "Content-Type: application/json\n%s", headers ? headers : "");
+        headers = h;
+    }
     int rc = hal_http(method, url, headers, body, on_http, r);
     if (rc < 0) free(r);
     return rc;

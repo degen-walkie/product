@@ -147,13 +147,16 @@ typedef struct {
     size_t len, cap;
 } http_job_t;
 
-#define HTTP_WORKERS 3
+#define HTTP_WORKERS 3      /* one per host, plus the fast lane below */
+#define HTTP_FAST HTTP_WORKERS
 typedef struct {
     QueueHandle_t q;
-    char host[64];
-    esp_http_client_handle_t c;
+    char host[2][64];                 /* two kept-alive connections: the fast lane serves two venues */
+    esp_http_client_handle_t conn[2];
+    int last;                         /* the slot used last; the other one is replaced first */
+    esp_http_client_handle_t c;       /* the slot in use for the current job */
 } http_worker_t;
-static http_worker_t s_hw[HTTP_WORKERS];
+static http_worker_t s_hw[HTTP_WORKERS + 1];
 
 static char *sdup(const char *s) { return s ? strdup(s) : NULL; }
 
@@ -221,8 +224,13 @@ static void http_run(http_worker_t *w, http_job_t *j)
 {
     char host[64];
     url_host(j->url, host, sizeof host);
-    if (w->c && strcmp(host, w->host)) { esp_http_client_cleanup(w->c); w->c = NULL; }
-    snprintf(w->host, sizeof w->host, "%s", host);
+    int k = !strcmp(host, w->host[0]) ? 0 : !strcmp(host, w->host[1]) ? 1 : !w->last;
+    if (strcmp(host, w->host[k])) {
+        if (w->conn[k]) { esp_http_client_cleanup(w->conn[k]); w->conn[k] = NULL; }
+        snprintf(w->host[k], sizeof w->host[k], "%s", host);
+    }
+    w->last = k;
+    w->c = w->conn[k];
 
     char *names[8], *vals[8];
     int nh = 0;
@@ -238,10 +246,18 @@ static void http_run(http_worker_t *w, http_job_t *j)
         if (!nl) break;
     }
     /* A kept-alive connection the server has since dropped fails once: reconnect and retry. */
+    int64_t t0 = esp_timer_get_time();
     if (http_try(w, j, names, vals, nh) != ESP_OK) {
         if (w->c) { esp_http_client_cleanup(w->c); w->c = NULL; }
-        if (http_try(w, j, names, vals, nh) != ESP_OK && w->c) { esp_http_client_cleanup(w->c); w->c = NULL; }
+        esp_err_t err = http_try(w, j, names, vals, nh);
+        if (err != ESP_OK && w->c) { esp_http_client_cleanup(w->c); w->c = NULL; }
+        if (err != ESP_OK) ESP_LOGW(TAG, "%s %.80s failed: %s", j->method, j->url, esp_err_to_name(err));
     }
+    w->conn[k] = w->c;
+    int ms = (int)((esp_timer_get_time() - t0) / 1000);
+    if (ms > 1500) ESP_LOGW(TAG, "slow %s %.60s %.40s: %d ms, %u bytes, %u queued", j->method, j->url, j->body ? j->body : "", ms,
+                            (unsigned)j->len, (unsigned)uxQueueMessagesWaiting(w->q));
+    if (j->status >= 400) ESP_LOGW(TAG, "%s %.80s -> %d %.120s", j->method, j->url, j->status, j->resp ? j->resp : "");
     platform_post(http_deliver, j);
 }
 
@@ -279,7 +295,15 @@ int hal_http(const char *method, const char *url, const char *headers, const cha
     j->body = sdup(body);
     j->cb = cb;
     j->ctx = ctx;
-    if (xQueueSend(http_route(url)->q, &j, 0) != pdTRUE) {
+    http_worker_t *w = NULL;
+    char *fast = j->headers ? strstr(j->headers, HAL_HTTP_FAST) : NULL;
+    if (fast) {   /* consume the marker: it is never sent */
+        size_t n = strlen(HAL_HTTP_FAST) + (fast[strlen(HAL_HTTP_FAST)] == '\n');
+        memmove(fast, fast + n, strlen(fast + n) + 1);
+        w = &s_hw[HTTP_FAST];
+    }
+    if (xQueueSend((w ? w : http_route(url))->q, &j, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "queue full, dropped %s %.60s %.40s", method, url, body ? body : "");
         http_free(j);
         return -1;
     }
@@ -487,6 +511,7 @@ static void wifi_init(void)
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_set_config(WIFI_IF_STA, &wc);
     esp_wifi_start();
+    esp_wifi_set_ps(WIFI_PS_NONE);   /* modem sleep adds hundreds of ms to every packet; the radio stays awake while the device is on */
     esp_sntp_config_t sc = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     esp_netif_sntp_init(&sc);
 }
@@ -503,7 +528,7 @@ void platform_init(void)
     esp_timer_create(&a, &s_led_t);
     esp_timer_create_args_t v = {.callback = vibe_off, .name = "vibe"};
     esp_timer_create(&v, &s_vibe_t);
-    for (int i = 0; i < HTTP_WORKERS; i++) {
+    for (int i = 0; i <= HTTP_WORKERS; i++) {
         s_hw[i].q = xQueueCreate(12, sizeof(http_job_t *));
         xTaskCreatePinnedToCore(http_task, "http", 8 * 1024, &s_hw[i], 4, NULL, 0);
     }

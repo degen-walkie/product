@@ -22,7 +22,7 @@ static bool s_listening, s_held;
 static void poll_tick(lv_timer_t *t)
 {
     (void)t;
-    if (!s_powered) return;
+    if (!s_powered || !hal_net_up()) return;
     for (int v = 0; v < V_COUNT; v++)
         if (dw_venue_enabled(v)) dw_venue(v)->poll();
     dw_relay_poll();

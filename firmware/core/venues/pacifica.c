@@ -59,7 +59,7 @@ static int signed_post(const char *path, const char *type, const char *data_sort
              g_model.acct[V_PAC].account, s_agent, sig58, ts, EXPIRY, fields);
     char url[160];
     snprintf(url, sizeof url, "%s" "%s", dw_url(U_PAC), path);
-    int rc = dw_http_json("POST", url, NULL, body, cb, ctx);
+    int rc = dw_http_json("POST", url, HAL_HTTP_FAST, body, cb, ctx);
     free(body);
     return rc;
 }
@@ -398,7 +398,7 @@ static int pac_candles(const char *coin, const char *interval, int count, dw_can
     char url[200];
     snprintf(url, sizeof url, "%s" "/kline?symbol=%s&interval=%s&start_time=%llu&end_time=%llu", dw_url(U_PAC), coin, interval,
              (unsigned long long)start, (unsigned long long)end);
-    return dw_http_json("GET", url, NULL, NULL, on_candles, c);
+    return dw_http_json("GET", url, HAL_HTTP_FAST, NULL, on_candles, c);
 }
 
 /* ---------- linking ---------- */

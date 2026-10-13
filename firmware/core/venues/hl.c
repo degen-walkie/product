@@ -97,6 +97,11 @@ static int info(const char *body, dw_json_cb cb, void *ctx)
     return dw_http_json("POST", dw_urlf(U_HL, "/info"), NULL, body, cb, ctx);
 }
 
+static int info_fast(const char *body, dw_json_cb cb, void *ctx)
+{
+    return dw_http_json("POST", dw_urlf(U_HL, "/info"), HAL_HTTP_FAST, body, cb, ctx);
+}
+
 static int exchange(const char *action_json, const uint8_t *mp, size_t mplen, dw_json_cb cb, void *ctx)
 {
     uint64_t nonce = dw_now_ms();
@@ -107,7 +112,7 @@ static int exchange(const char *action_json, const uint8_t *mp, size_t mplen, dw
     if (!body) return -1;
     snprintf(body, n, "{\"action\":%s,\"nonce\":%llu,\"signature\":%s,\"vaultAddress\":null}", action_json,
              (unsigned long long)nonce, sig);
-    int rc = dw_http_json("POST", dw_urlf(U_HL, "/exchange"), NULL, body, cb, ctx);
+    int rc = dw_http_json("POST", dw_urlf(U_HL, "/exchange"), HAL_HTTP_FAST, body, cb, ctx);
     free(body);
     return rc;
 }
@@ -117,7 +122,7 @@ static int exchange(const char *action_json, const uint8_t *mp, size_t mplen, dw
 static void on_meta(void *ctx, int status, cJSON *root)
 {
     (void)ctx;
-    if (status != 200 || !cJSON_IsArray(root)) return;
+    if (status != 200 || !cJSON_IsArray(root)) { s_meta_at = 0; return; }   /* retry on the next poll, not in a minute */
     cJSON *universe = cJSON_GetObjectItem(cJSON_GetArrayItem(root, 0), "universe");
     cJSON *ctxs = cJSON_GetArrayItem(root, 1);
     int n = 0, idx = 0;
@@ -307,7 +312,8 @@ static void on_role(void *ctx, int status, cJSON *root)
 
 static void hl_poll(void)
 {
-    if (!s_meta_at || hal_millis() - s_meta_at > 15000) {
+    /* every market's context is ~70 KB: once a minute (prices come over the WebSocket) */
+    if (!s_meta_at || hal_millis() - s_meta_at > 60000) {
         s_meta_at = hal_millis();
         info("{\"type\":\"metaAndAssetCtxs\"}", on_meta, NULL);
     }
@@ -589,7 +595,7 @@ static int hl_candles(const char *coin, const char *interval, int count, dw_cand
     snprintf(body, sizeof body,
              "{\"type\":\"candleSnapshot\",\"req\":{\"coin\":\"%s\",\"interval\":\"%s\",\"startTime\":%llu,\"endTime\":%llu}}",
              coin, interval, (unsigned long long)start, (unsigned long long)end);
-    return info(body, on_candles, c);
+    return info_fast(body, on_candles, c);
 }
 
 /* ---------- linking ---------- */

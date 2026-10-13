@@ -51,7 +51,7 @@ static void on_rooms(void *ctx, int status, cJSON *root)
 {
     (void)ctx;
     cJSON *arr = cJSON_GetObjectItem(root, "rooms");
-    if (status != 200 || !cJSON_IsArray(arr)) return;
+    if (status != 200 || !cJSON_IsArray(arr)) { s_rooms_at = 0; return; }   /* retry on the next poll */
     int n = 0;
     cJSON *it;
     cJSON_ArrayForEach(it, arr) {

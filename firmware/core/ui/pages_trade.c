@@ -92,18 +92,38 @@ void dw_open_chart(int venue, const char *coin)
     dw_nav_push(&PG_CHART);
 }
 
+static int s_ch_tries;
+static void ch_fetch(void);
+
+static void ch_retry(lv_timer_t *t)
+{
+    if ((uint32_t)(uintptr_t)lv_timer_get_user_data(t) == s_ch_req && s_ch_chart) ch_fetch();
+}
+
 static void on_ch_candles(void *ctx, const dw_candle_t *c, int n)
 {
     if ((uint32_t)(uintptr_t)ctx != s_ch_req || !s_ch_chart) return;
+    if (n == 0 && s_ch_tries < 3) {
+        lv_timer_t *t = lv_timer_create(ch_retry, 1500, (void *)(uintptr_t)s_ch_req);
+        lv_timer_set_repeat_count(t, 1);
+        return;
+    }
     dw_pos_t *p = dw_pos_find(g_chart_venue, g_chart_coin);
     ui_chart_set(s_ch_chart, c, n, dw_price(g_chart_venue, g_chart_coin), p ? p->entry : 0);
+}
+
+static void ch_fetch(void)
+{
+    s_ch_tries++;
+    const dw_venue_t *v = dw_venue(g_chart_venue);
+    v->candles(g_chart_coin, TF[s_tf], 48, on_ch_candles, (void *)(uintptr_t)s_ch_req);
 }
 
 static void ch_load(void)
 {
     s_ch_req++;
-    const dw_venue_t *v = dw_venue(g_chart_venue);
-    v->candles(g_chart_coin, TF[s_tf], 48, on_ch_candles, (void *)(uintptr_t)s_ch_req);
+    s_ch_tries = 0;
+    ch_fetch();
     ui_chips_set(s_ch_tf, s_tf);
 }
 

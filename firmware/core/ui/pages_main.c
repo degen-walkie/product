@@ -228,10 +228,30 @@ static void feed_render(void)
     lv_obj_scroll_to_y(s_room_feed, LV_COORD_MAX, LV_ANIM_OFF);
 }
 
+static int s_cnd_tries;
+static void room_candles_load(void);
+
+static void room_candles_retry(lv_timer_t *t)
+{
+    if ((uint32_t)(uintptr_t)lv_timer_get_user_data(t) == s_cnd_req && s_room_chart) room_candles_load();
+}
+
 static void on_room_candles(void *ctx, const dw_candle_t *c, int n)
 {
     if ((uint32_t)(uintptr_t)ctx != s_cnd_req || !s_room_chart) return;
+    if (n == 0 && s_cnd_tries < 3) {   /* a dropped request or an empty answer: try again shortly */
+        lv_timer_t *t = lv_timer_create(room_candles_retry, 1500, (void *)(uintptr_t)s_cnd_req);
+        lv_timer_set_repeat_count(t, 1);
+        return;
+    }
     ui_chart_set(s_room_chart, c, n, dw_price(s_room.venue, s_room.coin), 0);
+}
+
+static void room_candles_load(void)
+{
+    s_cnd_tries++;
+    const dw_venue_t *v = dw_venue(s_room.venue);
+    if (v) v->candles(s_room.coin, "15m", 48, on_room_candles, (void *)(uintptr_t)s_cnd_req);
 }
 
 static void room_tab_build(void)
@@ -254,8 +274,8 @@ static void room_tab_build(void)
         s_room_bigsub = ui_sub(s_room_area, "", C_NEON);
         s_room_chart = ui_chart(s_room_area, 190);
         s_cnd_req++;
-        const dw_venue_t *v = dw_venue(s_room.venue);
-        if (v) v->candles(s_room.coin, "15m", 48, on_room_candles, (void *)(uintptr_t)s_cnd_req);
+        s_cnd_tries = 0;
+        room_candles_load();
         ui_eyebrow(s_room_area, "15 MIN CANDLES \xC2\xB7 LIVE");
     } else {
         ui_eyebrow(s_room_area, "YOUR OPEN ORDERS & POSITION");
@@ -355,15 +375,23 @@ static void cancel_all(void)
     dw_toast(t, C_BLUE);
 }
 
+static void tab_switch(void *arg)
+{
+    (void)arg;
+    if (!s_room_area) return;
+    room_tab_build();
+    room_update();
+}
+
 static void tab_click(lv_event_t *e)
 {
     lv_obj_t *t = lv_event_get_target(e);
     lv_obj_t *tabs = lv_obj_get_parent(t);
     int idx = (int)lv_obj_get_index(t);
-    if (lv_obj_get_parent(tabs) != s_room_area || idx > 2) return;
+    if (lv_obj_get_parent(tabs) != s_room_area || idx > 2 || idx == s_tab) return;
+    if (s_room.venue < 0 && idx > 0) return;   /* the world room has chat only */
     s_tab = idx;
-    room_tab_build();
-    room_update();
+    lv_async_call(tab_switch, NULL);   /* rebuilding deletes the tab that was tapped: not inside its event */
 }
 
 static void room_build(lv_obj_t *body)

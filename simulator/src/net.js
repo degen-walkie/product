@@ -44,6 +44,7 @@ async function realHttp(method, url, headers, body, entry) {
 }
 
 export async function http(method, url, headers, body) {
+  headers = (headers || '').split('\n').filter((l) => l && !l.startsWith('X-DW-Lane')).join('\n');   // the firmware's lane marker
   const u = new URL(url);
   const entry = { kind: 'http', method, url, host: u.host, path: u.pathname, req: body, notes: [] };
   if (real) return realHttp(method, url, headers, body, entry);
