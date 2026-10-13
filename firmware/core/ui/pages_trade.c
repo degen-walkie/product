@@ -818,7 +818,9 @@ static void vo_show(const char *said)
     lv_label_set_text(s_vo_said, said);
     lv_obj_clean(s_vo_kv);
     if (!s_vo_ok) {
-        ui_label(s_vo_kv, &dw_sans_12, C_MUTE, "Try: \"Long SOL, five x, five hundred USDC\" or \"Close my ETH\".");
+        lv_obj_t *tip = ui_label(s_vo_kv, &dw_sans_12, C_MUTE, "Try: \"Long SOL, five x, five hundred USDC\" or \"Close my ETH\".");
+        lv_obj_set_width(tip, LV_PCT(100));
+        lv_label_set_long_mode(tip, LV_LABEL_LONG_WRAP);
         lv_obj_add_flag(s_vo_sign, LV_OBJ_FLAG_HIDDEN);
         dw_hint(NULL, "back", NULL, false);
         return;
@@ -862,6 +864,7 @@ static void vo_result(const char *text)
         return;
     }
     vo_show(q);
+    if (s_vo_ok) dw_sheet_open();   /* understood: straight to the confirmation sheet (the trade key signs) */
 }
 
 static void vo_review_click(lv_event_t *e)
