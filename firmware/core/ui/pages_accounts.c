@@ -143,6 +143,11 @@ static void lk_tick(lv_timer_t *t)
     (void)t;
     if (s_lk_state == 0) {
         dw_relay_link_poll(s_session, on_link, NULL);
+        dw_venue(g_link_venue)->poll();   /* the venue may confirm the key before the relay does */
+        if (g_model.acct[g_link_venue].linked) {
+            s_lk_state = 1;
+            s_lk_since = hal_millis();
+        }
     } else if (s_lk_state == 1) {
         dw_venue(g_link_venue)->poll();
         dw_acct_t *a = &g_model.acct[g_link_venue];

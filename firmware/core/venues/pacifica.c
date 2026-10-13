@@ -405,14 +405,17 @@ static int pac_candles(const char *coin, const char *interval, int count, dw_can
 
 static int pac_link_begin(const char *session, char *qr, size_t cap)
 {
-    uint8_t k[32];
-    hal_random_fill(k, 32);
-    char hex[65];
-    dw_hex(k, 32, hex, false);
-    memset(k, 0, sizeof k);
-    hal_store_set("pac.key", hex);
-    hal_store_set("pac.acct", NULL);
     load_key();
+    if (!s_has_key || g_model.acct[V_PAC].linked) {   /* keep a pending key: its QR may already be signed */
+        uint8_t k[32];
+        hal_random_fill(k, 32);
+        char hex[65];
+        dw_hex(k, 32, hex, false);
+        memset(k, 0, sizeof k);
+        hal_store_set("pac.key", hex);
+        hal_store_set("pac.acct", NULL);
+        load_key();
+    }
     snprintf(qr, cap, "%s?v=pac&agent=%s&s=%s&n=%s%s", dw_url(U_LINK), s_agent, session, dw_net_name(), dw_relay_param());
     return 0;
 }

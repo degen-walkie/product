@@ -43,6 +43,10 @@ if (!link || !link.agent || !link.session) {
     try {
       const acct = await W.approveLink(link, relay, log);
       log(`Done. Look at the device: it is linked to ${W.short(acct)}.`);
+      $('go').hidden = true;
+      $('hint').hidden = true;
+      $('detail').insertAdjacentHTML('beforebegin', `<div class="done"><b>✓ Approved</b>
+        <span>${venue} accepted the device key for ${W.short(acct)}. The device links in a few seconds; you can close this page.</span></div>`);
     } catch (e) {
       log(`Stopped: ${e.message || e}`);
       $('go').disabled = false;

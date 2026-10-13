@@ -240,6 +240,24 @@ static void on_agents(void *ctx, int status, cJSON *root)
     }
 }
 
+/* A key without an account: the device was waiting for an approval and missed the
+ * relay's answer (it left the link page, lost power, or the relay restarted).
+ * Hyperliquid itself says which main wallet approved an agent. */
+static uint32_t s_role_at;
+static void hl_poll(void);
+
+static void on_role(void *ctx, int status, cJSON *root)
+{
+    (void)ctx;
+    if (status != 200 || !root || strcmp(dw_jstr(root, "role"), "agent")) return;
+    const char *user = dw_jstr(cJSON_GetObjectItem(root, "data"), "user");
+    if (!*user || g_model.acct[V_HL].linked || !s_has_key) return;
+    hal_store_set("hl.acct", user);
+    load_key();
+    dw_model_touch();
+    hl_poll();
+}
+
 static void hl_poll(void)
 {
     if (!s_meta_at || hal_millis() - s_meta_at > 15000) {
@@ -247,8 +265,15 @@ static void hl_poll(void)
         info("{\"type\":\"metaAndAssetCtxs\"}", on_meta, NULL);
     }
     dw_acct_t *a = &g_model.acct[V_HL];
-    if (!a->linked) return;
     char body[160];
+    if (!a->linked) {
+        if (s_has_key && (!s_role_at || hal_millis() - s_role_at > 4000)) {
+            s_role_at = hal_millis();
+            snprintf(body, sizeof body, "{\"type\":\"userRole\",\"user\":\"%s\"}", s_agent);
+            info(body, on_role, NULL);
+        }
+        return;
+    }
     snprintf(body, sizeof body, "{\"type\":\"clearinghouseState\",\"user\":\"%s\"}", a->account);
     info(body, on_state, NULL);
     snprintf(body, sizeof body, "{\"type\":\"frontendOpenOrders\",\"user\":\"%s\"}", a->account);
@@ -505,15 +530,21 @@ static int hl_candles(const char *coin, const char *interval, int count, dw_cand
 
 static int hl_link_begin(const char *session, char *qr, size_t cap)
 {
-    uint8_t k[32];
-    uint8_t a[20];
-    do hal_random_fill(k, 32); while (!dw_secp_pubkey_address(k, a));
-    char hex[65];
-    dw_hex(k, 32, hex, false);
-    hal_store_set("hl.key", hex);
-    hal_store_set("hl.acct", NULL);
-    memset(k, 0, sizeof k);
     load_key();
+    if (!s_has_key || g_model.acct[V_HL].linked) {
+        /* a fresh key; a pending one (made, not yet approved) is kept, so a QR that was
+         * already scanned and signed still links */
+        uint8_t k[32];
+        uint8_t a[20];
+        do hal_random_fill(k, 32); while (!dw_secp_pubkey_address(k, a));
+        char hex[65];
+        dw_hex(k, 32, hex, false);
+        hal_store_set("hl.key", hex);
+        hal_store_set("hl.acct", NULL);
+        memset(k, 0, sizeof k);
+        load_key();
+    }
+    s_role_at = 0;
     g_model.acct[V_HL].approved = false;
     snprintf(qr, cap, "%s?v=hl&agent=%s&s=%s&n=%s%s", dw_url(U_LINK), s_agent, session, dw_net_name(), dw_relay_param());
     return 0;
