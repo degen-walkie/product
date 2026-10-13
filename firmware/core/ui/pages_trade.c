@@ -340,6 +340,7 @@ static void tk_adjust(int d)
     case F_SIZE: {
         int i = idx_of(PCT, 4, g_ticket.size_pct) + d;
         g_ticket.size_pct = PCT[i < 0 ? 0 : i > 3 ? 3 : i];
+        g_ticket.size_base = 0;
         break;
     }
     case F_TP: {
@@ -384,7 +385,7 @@ static void chip_pick(lv_event_t *e)
     if (box == s_tk_side) g_ticket.buy = idx == 0;
     else if (box == s_tk_type) { g_ticket.limit = idx == 1; g_ticket.limit_px = 0; }
     else if (box == s_tk_lev && idx < 5) g_ticket.lev = LEV[idx];
-    else if (box == s_tk_pct && idx < 4) g_ticket.size_pct = PCT[idx];
+    else if (box == s_tk_pct && idx < 4) { g_ticket.size_pct = PCT[idx]; g_ticket.size_base = 0; }
     else if (box == s_tk_tp && idx < 4) g_ticket.tp_pct = TPS[idx];
     else if (box == s_tk_sl && idx < 4) g_ticket.sl_pct = SLS[idx];
     else return;
@@ -628,7 +629,7 @@ void dw_sheet_open(void)
     sheet_close();
     s_sheet = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(s_sheet);
-    lv_obj_set_size(s_sheet, SCR_W, SCR_H);
+    lv_obj_set_size(s_sheet, SCR_W, SCR_H - HINT_H);   /* the hint bar stays visible: "cancel" is tappable */
     lv_obj_set_style_bg_color(s_sheet, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_sheet, 150, 0);
     lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_CLICKABLE);
@@ -637,7 +638,7 @@ void dw_sheet_open(void)
     lv_obj_t *p = lv_obj_create(s_sheet);
     lv_obj_remove_style_all(p);
     lv_obj_set_size(p, SCR_W, LV_SIZE_CONTENT);
-    lv_obj_align(p, LV_ALIGN_BOTTOM_MID, 0, -HINT_H);
+    lv_obj_align(p, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(p, lv_color_hex(0x12161b), 0);
     lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
     lv_obj_set_style_border_side(p, LV_BORDER_SIDE_TOP, 0);
@@ -740,9 +741,11 @@ bool dw_parse_order(const char *text, dw_ticket_t *t)
     char coin[12] = "";
     char *save = NULL;
     for (char *w = strtok_r(buf, " ", &save); w; w = strtok_r(NULL, " ", &save)) {
+        size_t L = strlen(w);
+        while (L && w[L - 1] == '.') w[--L] = 0;   /* "3x." at the end of a sentence */
+        if (!L) continue;
         int nw = num_word(w);
         bool digit = isdigit((unsigned char)w[0]);
-        size_t L = strlen(w);
         if (digit && w[L - 1] == 'x') { lev = atoi(w); continue; }
         if (digit || nw >= 0 || !strcmp(w, "hundred") || !strcmp(w, "thousand") || !strcmp(w, "k")) {
             in_num = true;
@@ -864,7 +867,9 @@ static void vo_result(const char *text)
         return;
     }
     vo_show(q);
-    if (s_vo_ok) dw_sheet_open();   /* understood: straight to the confirmation sheet (the trade key signs) */
+    if (!s_vo_ok) return;
+    if (g_ticket.reduce) { dw_sheet_open(); return; }   /* a close has nothing to adjust */
+    dw_nav_replace(&PG_TICKET);   /* understood: the ticket, filled in, to adjust and review */
 }
 
 static void vo_review_click(lv_event_t *e)
