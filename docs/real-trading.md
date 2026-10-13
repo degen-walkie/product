@@ -99,14 +99,14 @@ Check the venue's own testnet app: the position is there, opened by your device'
 
 - **Room → Orders tab** (roll twice inside a room) shows your position, resting limit orders and TP/SL triggers. Press the trade key there to cancel open orders.
 - **Positions** (swipe left from Rooms) shows every position with PnL and distance to liquidation. Open one for the chart, then **ADD**, **HALF** or **CLOSE**. Closing is reduce-only at market and also needs the trade key.
-- **Voice orders**: hold Talk anywhere outside a room and say an order ("long SOL five x fifty USDC"). Type it in the **Mic** tab, or tick *Use my real microphone*. It becomes a ticket; the trade key still signs.
+- **Voice orders**: hold Talk anywhere outside a room and say an order ("long SOL five x fifty USDC"). Type it in the **Mic** tab, or tick *Use my microphone* (your browser asks for permission). It becomes a ticket; the trade key still signs.
 
 ![TP and SL waiting on the venue](img/08-orders-tpsl.png) ![Closing from the chart](img/09-close.png)
 
 ## 7. Rooms and the AI
 
 - **Rooms are live and shared.** Everyone using the simulator or a device is in the same rooms. Hold **Talk** in a room to post (typed text or your microphone). Each listener reads your message in their own language.
-- You need a linked venue to post. Rooms are moderated: links are removed, scams are blocked, and posting is rate-limited per address.
+- You don't need a linked venue to talk: without one you show as a guest. Rooms are moderated: links are removed, scams are blocked, and posting is rate-limited per address or device.
 - **Ask** (swipe to it) answers questions about your own book: liquidation distance, funding, a summary. The AI is read-only and cannot trade.
 
 ![A room message translated for a Chinese-speaking listener](img/07-room-translated.png)

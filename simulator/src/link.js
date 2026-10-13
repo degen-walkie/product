@@ -19,8 +19,26 @@ if (!link || !link.agent || !link.session) {
   $('hint').textContent = link.venue === 'hl'
     ? 'Open this page in your EVM wallet\'s browser (MetaMask, Rabby, Coinbase Wallet) if the button does nothing.'
     : 'Open this page in your Solana wallet\'s browser (Phantom, Backpack) if the button does nothing.';
+  // A phone's camera opens the link in Safari or Chrome, where no wallet is injected.
+  // Offer to reopen this exact page inside the wallet app's own browser.
+  const here = location.href;
+  const WALLETS = link.venue === 'hl'
+    ? [['MetaMask', `https://metamask.app.link/dapp/${here.replace(/^https?:\/\//, '')}`],
+       ['Coinbase Wallet', `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(here)}`]]
+    : [['Phantom', `https://phantom.app/ul/browse/${encodeURIComponent(here)}?ref=${encodeURIComponent(location.origin)}`],
+       ['Backpack', `https://backpack.app/ul/v1/browse/${encodeURIComponent(here)}?ref=${encodeURIComponent(location.origin)}`]];
+  const hasWallet = () => (link.venue === 'hl' ? !!window.ethereum : !!(window.phantom?.solana || window.solana || window.backpack));
+  const offerApps = () => {
+    $('openin').hidden = false;
+    $('openin').innerHTML = '<p>No wallet in this browser. Open this page in your wallet app:</p>'
+      + WALLETS.map(([name, url], i) => `<a class="primary${i ? ' alt' : ''}" href="${url}">Open in ${name}</a>`).join('');
+    $('go').textContent = 'Try again';
+  };
+  setTimeout(() => { if (!hasWallet()) offerApps(); }, 600);   // wallets inject a moment after load
   $('go').addEventListener('click', async () => {
     const log = (t) => { $('log').hidden = false; $('log').textContent += t + '\n'; };
+    if (!hasWallet()) { offerApps(); return; }
+    $('openin').hidden = true;
     $('go').disabled = true;
     try {
       const acct = await W.approveLink(link, relay, log);

@@ -65,7 +65,7 @@ const image = ctx.createImageData(320, 480);
 const pixels = new Uint32Array(image.data.buffer);
 let currentQr = '';
 let listening = false;
-let recog = null, recogText = '';
+
 
 const ui = {
   pixels,
@@ -78,28 +78,95 @@ const ui = {
   listen(on) {
     listening = on;
     $('ptt').classList.toggle('on', on);
-    if (on) {
-      recogText = '';
-      if ($('use-mic').checked && recog) { try { recog.start(); } catch { /* running */ } }
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      const typed = () => $('say').value.trim() || $('say').placeholder;
-      if ($('use-mic').checked && recog) {
-        recog.onend = () => resolve(recogText || typed());
-        try { recog.stop(); } catch { resolve(typed()); }
-        setTimeout(() => resolve(recogText || typed()), 2500);
-      } else setTimeout(() => resolve(typed()), 300);
-    });
+    const typed = () => $('say').value.trim() || $('say').placeholder;
+    if (on) { if (micOn()) mic.start(); return Promise.resolve(); }
+    if (!micOn()) return new Promise((resolve) => setTimeout(() => resolve(typed()), 300));
+    return mic.stop().then((text) => { if (text) $('say').value = text; return text; });
   },
 };
 
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (SR) {
-  recog = new SR();
-  recog.lang = 'en-US';
-  recog.onresult = (e) => { recogText = Array.from(e.results).map((r) => r[0].transcript).join(' '); $('say').value = recogText; };
-} else $('use-mic').disabled = true;
+/* ---------------- the real microphone (Real mode) ----------------
+ * Same path as the device: record while talk is held, send the clip to the
+ * relay's speech-to-text, in the device's language. The browser asks first. */
+// 16 kHz mono WAV, the same format the device sends; every speech-to-text API takes it.
+async function toWav(blob) {
+  const ctx = new AudioContext();
+  const src = await ctx.decodeAudioData(await blob.arrayBuffer());
+  ctx.close();
+  const off = new OfflineAudioContext(1, Math.ceil(src.duration * 16000), 16000);
+  const node = off.createBufferSource();
+  node.buffer = src;
+  node.connect(off.destination);
+  node.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const out = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const str = (o, t) => [...t].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); out.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVEfmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
+  out.setUint32(24, 16000, true); out.setUint32(28, 32000, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
+  str(36, 'data'); out.setUint32(40, pcm.length * 2, true);
+  pcm.forEach((v, i) => out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 0x7fff, true));
+  return new Blob([out], { type: 'audio/wav' });
+}
+
+const micOn = () => MODE === 'real' && !!mic.stream;
+const mic = {
+  stream: null, rec: null, chunks: [], t0: 0,
+  note(t, cls = '') { $('mic-note').textContent = t; $('mic-note').className = `small ${cls}`; },
+  async enable() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) { this.note('This browser cannot record audio.', 'no'); return false; }
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      this.note('Microphone on. Hold Talk (or M) and speak; release to send.', 'ok');
+      return true;
+    } catch (e) {
+      this.note(e.name === 'NotAllowedError' ? 'Microphone permission was denied. Allow it in the address bar, then tick the box again.' : `Microphone unavailable: ${e.message}`, 'no');
+      return false;
+    }
+  },
+  disable() {
+    if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this.note('Off: the typed text above is used.');
+  },
+  start() {
+    this.chunks = [];
+    this.t0 = Date.now();
+    try {
+      this.rec = new MediaRecorder(this.stream);
+      this.rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
+      this.rec.start();
+      this.note('● Recording… release to send.', 'ok');
+    } catch (e) { this.rec = null; this.note(`Could not record: ${e.message}`, 'no'); }
+  },
+  stop() {
+    const rec = this.rec;
+    this.rec = null;
+    if (!rec) return Promise.resolve('');
+    return new Promise((resolve) => {
+      rec.onstop = async () => {
+        if (Date.now() - this.t0 < 300) { this.note('Too short. Hold Talk while you speak.'); return resolve(''); }
+        let blob = new Blob(this.chunks, { type: rec.mimeType || 'audio/webm' });
+        try { blob = await toWav(blob); } catch { /* send what the browser recorded */ }
+        const lang = (localStorage.getItem(storeKey(NET, 'lang')) || 'EN').toLowerCase();
+        this.note('Transcribing…');
+        try {
+          const r = await fetch(`${RELAY}/stt?lang=${lang}`, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || `relay said ${r.status}`);
+          const text = (j.text || '').trim();
+          this.note(text ? `Heard: “${text}”` : 'Nothing heard.', text ? 'ok' : '');
+          resolve(text);
+        } catch (e) { this.note(`Speech-to-text failed: ${e.message}`, 'no'); resolve(''); }
+      };
+      rec.stop();
+    });
+  },
+};
+$('use-mic').addEventListener('change', async (e) => {
+  if (e.target.checked) e.target.checked = await mic.enable();
+  else mic.disable();
+});
 
 /* ---------------- effects (what is being pressed) ---------------- */
 const KEY_EL = { wheel: 'k-wheel', trade: 'k-trade', power: 'k-power' };

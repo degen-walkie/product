@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "audio.h"
 #include "board.h"
 #include "dw_hal.h"
 #include "esp_crt_bundle.h"
@@ -124,12 +125,12 @@ int hal_store_set(const char *key, const char *val)
 }
 
 /* ---------------- voice ----------------
- * The ES8388 capture path and the relay's speech-to-text stream are not in this
- * build yet; report "nothing heard" so the UI falls back to touch and the wheel. */
+ * audio.c records while talk is held and sends the clip to the relay's
+ * speech-to-text. Without a codec, report "nothing heard". */
 
 static void voice_none(void *arg) { dw_app_voice_result(NULL); }
-void hal_voice_start(void) {}
-void hal_voice_stop(void) { platform_post(voice_none, NULL); }
+void hal_voice_start(void) { audio_start(); }
+void hal_voice_stop(void) { if (!audio_stop()) platform_post(voice_none, NULL); }
 
 /* ---------------- HTTP ---------------- */
 

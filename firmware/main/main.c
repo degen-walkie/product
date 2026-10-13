@@ -1,6 +1,7 @@
 /* ESP32-S3 entry point: board, LVGL, the input poller and the UI task. */
 #include <string.h>
 
+#include "audio.h"
 #include "board.h"
 #include "dw_app.h"
 #include "dw_hal.h"
@@ -128,6 +129,7 @@ void app_main(void)
     s_ui_q = xQueueCreate(64, sizeof(ui_job_t));
     board_init();
     platform_init();   /* NVS, Wi-Fi, SNTP, status light */
+    audio_init();      /* ES8388 + I2S for hold-to-talk */
     xTaskCreatePinnedToCore(ui_task, "ui", 16 * 1024, NULL, 5, NULL, 1);
     xTaskCreatePinnedToCore(input_task, "input", 4 * 1024, NULL, 6, NULL, 0);
     ESP_LOGI(TAG, "Degen Walkie " DW_FW_VERSION " started");

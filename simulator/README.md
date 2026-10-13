@@ -29,7 +29,7 @@ This folder is everything around the device:
 
 - **Real:** the firmware, its UI, the order flow and the signing. Hyperliquid requests are signed with EIP-712 over a msgpack hash, Pacifica requests with Ed25519 over sorted JSON. The mocks verify those signatures the way the venues do, and the Network tab shows each check.
 - **Mocked:** the three venues, the relay and the market. Endpoints and payloads follow the real APIs. Prices start from Hyperliquid's public mids when the browser can reach them, then follow a random walk. Nothing touches real funds.
-- **Stand-ins:** Lighter's signature (see the firmware README), the AI (preset answers built from your live positions) and voice (typed text, or Chrome's speech recognition).
+- **Stand-ins:** Lighter's signature (see the firmware README) and, in the Demo, the AI (preset answers built from your live positions) and voice (typed text). In Real mode the mic is your browser's microphone (it asks first), sent to the relay's speech-to-text like the device does.
 
 Each demo starts from a clean simulated device. In Real mode, each network keeps its own device state in `localStorage` (Settings → Factory reset clears it).
 

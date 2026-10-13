@@ -48,7 +48,8 @@ bool dw_sheet_input(dw_input_t in);
 /* Voice: whoever is on screen can take the transcript. */
 typedef void (*dw_voice_sink)(const char *text);
 void dw_voice_sink_set(dw_voice_sink s);
-bool dw_voice_listening(void);
+bool dw_voice_listening(void);   /* from talk pressed until the text arrives */
+bool dw_voice_held(void);        /* talk is held right now */
 /* Parse a spoken order ("long sol five x five hundred usdc"). Returns false if it is not one. */
 bool dw_parse_order(const char *text, dw_ticket_t *t);
 

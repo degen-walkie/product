@@ -679,15 +679,29 @@ lv_obj_t *ui_sign(lv_obj_t *parent, const char *text)
 
 /* ---- push to talk ---- */
 
-typedef struct { lv_obj_t *bars[9]; lv_timer_t *t; bool active; } ptt_t;
+/* The talk button: idle (HOLD), held (LIVE, recording) and released while the
+ * clip is being transcribed (SENDING). */
+typedef struct { lv_obj_t *o, *bars[9], *h, *s; lv_timer_t *t; bool active; int state; char sub[24]; } ptt_t;
 
 static void ptt_tick(lv_timer_t *t)
 {
     ptt_t *p = lv_timer_get_user_data(t);
     uint32_t ms = lv_tick_get();
+    int state = p->active || dw_voice_held() ? 1 : dw_voice_listening() ? 2 : 0;
+    if (state != p->state) {
+        p->state = state;
+        static const char *H[] = {"HOLD", "LIVE", "SENDING"};
+        lv_label_set_text(p->h, H[state]);
+        lv_label_set_text(p->s, state == 1 ? "RELEASE TO SEND" : state == 2 ? "TRANSCRIBING\xE2\x80\xA6" : p->sub);
+        lv_obj_set_style_text_color(p->h, C(state == 2 ? C_SOFT : C_NEON), 0);
+        lv_obj_set_style_border_color(p->o, C(state == 2 ? C_LINE2 : C_NEON), 0);
+        lv_obj_set_style_shadow_opa(p->o, state == 2 ? 0 : state == 1 ? 120 : 50, 0);
+    }
     for (int i = 0; i < 9; i++) {
-        double amp = p->active ? 16 : 7;
-        int h = 4 + (int)(amp * fabs(sin(ms / 330.0 + i * 0.9)));
+        /* held: loud; sending: a travelling dot; idle: breathing */
+        int h = state == 1 ? 4 + (int)(16 * fabs(sin(ms / 140.0 + i * 1.3)))
+              : state == 2 ? ((int)(ms / 90) % 9 == i ? 14 : 4)
+                           : 4 + (int)(7 * fabs(sin(ms / 330.0 + i * 0.9)));
         lv_obj_set_height(p->bars[i], h);
     }
 }
@@ -728,6 +742,8 @@ lv_obj_t *ui_ptt(lv_obj_t *parent, const char *sub)
     lv_obj_set_style_shadow_opa(o, 50, 0);
     lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
     ptt_t *p = calloc(1, sizeof *p);
+    p->o = o;
+    snprintf(p->sub, sizeof p->sub, "%s", sub);
     lv_obj_t *bars = box(o);
     lv_obj_set_size(bars, 60, 22);
     lv_obj_align(bars, LV_ALIGN_CENTER, 0, -18);
@@ -741,10 +757,10 @@ lv_obj_t *ui_ptt(lv_obj_t *parent, const char *sub)
         lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
         p->bars[i] = b;
     }
-    lv_obj_t *h = ui_label(o, &dw_disp_20, C_NEON, "HOLD");
-    lv_obj_align(h, LV_ALIGN_CENTER, 0, 10);
-    lv_obj_t *s = ui_label(o, &dw_mono_9, C_MUTE, sub);
-    lv_obj_align(s, LV_ALIGN_CENTER, 0, 30);
+    p->h = ui_label(o, &dw_disp_20, C_NEON, "HOLD");
+    lv_obj_align(p->h, LV_ALIGN_CENTER, 0, 10);
+    p->s = ui_label(o, &dw_mono_9, C_MUTE, sub);
+    lv_obj_align(p->s, LV_ALIGN_CENTER, 0, 30);
     p->t = lv_timer_create(ptt_tick, 60, p);
     lv_obj_add_event_cb(o, ptt_event, LV_EVENT_ALL, p);
     return o;

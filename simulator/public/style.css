@@ -207,3 +207,4 @@ dialog p, dialog li { color: var(--soft); line-height: 1.55; font-size: 14.5px; 
 @media (min-width: 901px) and (max-height: 960px) { .device { --s: 0.98; } }
 @media (min-width: 901px) and (max-height: 840px) { .device { --s: 0.86; } }
 .caption[hidden] { display: none; }
+#mic-note { color: var(--soft); margin: 2px 0 8px; } #mic-note.ok { color: var(--neon); } #mic-note.no { color: var(--bad); }

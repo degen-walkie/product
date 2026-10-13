@@ -17,7 +17,7 @@
 static bool s_powered, s_started, s_screen_off;
 static lv_obj_t *s_off_layer;
 static dw_voice_sink s_sink;
-static bool s_listening;
+static bool s_listening, s_held;
 
 static void poll_tick(lv_timer_t *t)
 {
@@ -93,6 +93,7 @@ void dw_app_init(void)
 
 void dw_voice_sink_set(dw_voice_sink s) { s_sink = s; }
 bool dw_voice_listening(void) { return s_listening; }
+bool dw_voice_held(void) { return s_held; }
 
 void dw_app_voice_result(const char *text)
 {
@@ -160,8 +161,8 @@ void dw_app_input(dw_input_t in)
             dw_nav_push(&PG_VOICE);
             handled = PG_VOICE.input(in);
         }
-        if (in == DW_IN_PTT_DOWN && handled) { s_listening = true; hal_voice_start(); }
-        if (in == DW_IN_PTT_UP && s_listening) hal_voice_stop();
+        if (in == DW_IN_PTT_DOWN && handled) { s_listening = s_held = true; hal_voice_start(); }
+        if (in == DW_IN_PTT_UP && s_held) { s_held = false; hal_voice_stop(); }
         return;
     }
     const dw_page_t *p = dw_nav_top();

@@ -9,6 +9,14 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 # TLS buffers in PSRAM: the device keeps several HTTPS / WSS connections open at once
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# Software AES: hardware AES needs a DMA bounce buffer in internal RAM per record,
+# and internal RAM runs out with several TLS sockets open ("esp-aes: Failed to allocate memory")
+CONFIG_MBEDTLS_HARDWARE_AES=n
+# Wi-Fi and lwIP buffers in PSRAM (internal RAM is the scarce one), and a bigger TCP
+# window so a voice clip uploads in a couple of seconds instead of twenty
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
+CONFIG_LWIP_TCP_WND_DEFAULT=16384
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y

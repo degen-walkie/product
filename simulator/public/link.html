@@ -15,6 +15,10 @@
   .net.MAINNET { color: #fff; background: var(--bad); }
   #go { width: 100%; margin-top: 6px; }
   .hint { font-size: 13px; color: var(--mute); line-height: 1.5; }
+  #openin { margin: 6px 0 10px; }
+  #openin p { font-size: 13.5px; color: var(--soft); margin: 0 0 8px; }
+  #openin a { display: block; text-align: center; text-decoration: none; margin-bottom: 8px; }
+  #openin a.alt { background: transparent; color: var(--neon); }
 </style>
 </head>
 <body>
@@ -23,6 +27,7 @@
   <div class="card">
     <h3>Approve the device key<span class="net" id="net"></span></h3>
     <div id="detail"></div>
+    <div id="openin" hidden></div>
     <button id="go" class="primary">Approve with my wallet</button>
     <pre id="log" hidden></pre>
     <p class="hint" id="hint"></p>

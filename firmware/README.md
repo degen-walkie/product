@@ -34,7 +34,7 @@ tools/                build_sim.py, gen_fonts.py
 ## What it does
 
 - **Power and setup.** Off → hold power → boot → first-time setup (language, Wi-Fi, PIN, link a venue). Short press: screen off with the room still playing. Hold: slide-to-power-off.
-- **Rooms.** A world room and one room per asset. Hold to talk; every listener gets the message in their own language.
+- **Rooms.** A world room and one room per asset. Hold to talk: the ES8388 records, the relay turns it into text, and every listener gets it in their own language. No linked account needed to talk; an unlinked device shows as a guest.
 - **Trading.** Ticket with long/short, market/limit, leverage, size by share of free margin, take profit and stop loss. One confirmation sheet; only the trade key signs. Close / half / add from the chart, cancel resting orders from the room.
 - **Voice orders and Ask.** Speak an order and it becomes a ticket; ask about your book and a read-only AI answers.
 - **Navigation.** Thumb wheel and trade key for everything, or touch: tap, scroll, swipe between top pages, pull down for quick settings.
@@ -64,7 +64,8 @@ Rooms, news, the AI and the linking handshake go through the Degen Walkie relay 
 | `GET /v1/news` | nothing | headlines |
 | `POST /v1/ask` | the question, display language, position summary (venue, coin, size, entry, liquidation, leverage, PnL, mark, funding) | an answer |
 | `GET /v1/link/:session` | the random session id from the QR | the approved account address |
-| `WS /v1/ws` | `hello {addr, lang}` (the linked account address), `join {room}`, `say {room, text, lang, addr}` | `msg`, `news`, `listening` |
+| `POST /v1/stt?lang=xx` | the clip recorded while talk is held (8-bit mu-law WAV, 16 kHz) | the text |
+| `WS /v1/ws` | `hello {addr, dev, lang}` (the linked account address, if any, and a random device id), `join {room}`, `say {room, text, lang, addr}` | `msg`, `news`, `listening` |
 
 ## Build for the device
 
@@ -108,7 +109,6 @@ npx serve public            # or any static server
 ## Not done yet
 
 - Lighter's real transaction signer (see above); Lighter is locked outside the demo until then.
-- Voice on the device: ES8388 capture and streaming to the relay's speech-to-text. The simulator uses typed text or the browser's speech recognition.
 - Wi-Fi setup by scanning a QR with the rear camera. Development builds take Wi-Fi from menuconfig.
 - HTTP keep-alive per venue, OTA updates, the camera. With the CJK font the image is 2.4 MB; OTA needs two app slots, so it needs the 8 MB flash module or a smaller font.
 - The blue channel of the status light is not fitted on rev 7, so blue shows as green + red.

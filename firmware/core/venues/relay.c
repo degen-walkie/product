@@ -105,11 +105,25 @@ static const char *my_lang(void)
     return lang;
 }
 
+/* A random id made once per device: names an unlinked device in the rooms (as a
+ * guest) and rate-limits it. It is not tied to any account. */
+static const char *my_dev(void)
+{
+    static char id[20];
+    if (!id[0] && hal_store_get("dev.id", id, sizeof id) != 16) {
+        uint8_t r[8];
+        hal_random_fill(r, sizeof r);
+        for (int i = 0; i < 8; i++) snprintf(id + i * 2, 3, "%02x", r[i]);
+        hal_store_set("dev.id", id);
+    }
+    return id;
+}
+
 static void send_hello(void)
 {
     if (!s_ws_open) return;
-    char buf[160];
-    snprintf(buf, sizeof buf, "{\"op\":\"hello\",\"addr\":\"%s\",\"lang\":\"%s\"}", my_addr(), my_lang());
+    char buf[200];
+    snprintf(buf, sizeof buf, "{\"op\":\"hello\",\"addr\":\"%s\",\"dev\":\"%s\",\"lang\":\"%s\"}", my_addr(), my_dev(), my_lang());
     hal_ws_send(s_ws, buf);
 }
 
